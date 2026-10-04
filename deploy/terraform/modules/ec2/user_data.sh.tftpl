@@ -1,0 +1,116 @@
+#!/bin/bash
+# Boot script for adl-signer instances (Amazon Linux 2023, arm64).
+set -euo pipefail
+
+dnf install -y amazon-cloudwatch-agent
+
+useradd --system --no-create-home --shell /sbin/nologin adl || true
+install -d -o adl -g adl -m 0750 /var/log/adl-signer
+
+# Fetch the exact build Terraform uploaded and refuse to run anything else.
+aws s3 cp --region ${region} "s3://${bucket}/${key}" /usr/local/bin/adl-signer.download
+echo "${sha256}  /usr/local/bin/adl-signer.download" | sha256sum -c -
+install -o root -g root -m 0755 /usr/local/bin/adl-signer.download /usr/local/bin/adl-signer
+rm -f /usr/local/bin/adl-signer.download
+
+# Nothing in here is secret (ARNs, names, the auth policy) but keep it
+# readable by the service only anyway.
+cat > /etc/adl-signer.env <<'ENVEOF'
+AWS_REGION='${region}'
+${env_file}
+ENVEOF
+chown root:adl /etc/adl-signer.env
+chmod 0640 /etc/adl-signer.env
+
+cat > /etc/systemd/system/adl-signer.service <<'UNITEOF'
+[Unit]
+Description=ADL device certificate signing server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=adl
+Group=adl
+EnvironmentFile=/etc/adl-signer.env
+ExecStart=/usr/local/bin/adl-signer serve
+Restart=always
+RestartSec=2
+StandardOutput=append:/var/log/adl-signer/signer.log
+StandardError=append:/var/log/adl-signer/signer.log
+
+# Hardening: the process needs the network and its log dir, nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/log/adl-signer
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+
+cat > /etc/logrotate.d/adl-signer <<'ROTEOF'
+/var/log/adl-signer/signer.log {
+  daily
+  rotate 7
+  compress
+  missingok
+  copytruncate
+}
+ROTEOF
+
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWEOF'
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/adl-signer/signer.log",
+            "log_group_name": "${log_group}",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": -1
+          }
+        ]
+      }
+    }
+  }
+}
+CWEOF
+
+systemctl daemon-reload
+systemctl enable --now adl-signer
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+# Wait until the service answers before the ALB health check starts.
+for _ in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:${listen_port}/healthz" >/dev/null; then
+    exit 0
+  fi
+  sleep 2
+done
+echo "adl-signer did not become healthy" >&2
+journalctl -u adl-signer --no-pager | tail -50 >&2
+exit 1

@@ -13,3 +13,4 @@
 !*.tfvars.example
 crash.log
 .env
+!deploy/terraform/**/tests/fixtures/*

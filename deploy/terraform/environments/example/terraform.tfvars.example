@@ -1,0 +1,22 @@
+region          = "us-east-1"
+deployment_mode = "lambda" # or "ec2" or "both"
+
+# Bind IAM Identity Center permission sets instead of (or as well as) the
+# adl-* roles the core module creates.
+# auth_bindings = [
+#   { roles = ["AWSReservedSSO_ADLDeveloper_*"], permissions = ["dev:issue", "dev:read", "dev:key-read"] },
+#   { roles = ["AWSReservedSSO_ADLCAAdmin_*"],   permissions = ["*"] },
+# ]
+
+# break_glass_role_arns = ["arn:aws:iam::123456789012:role/adl-break-glass"]
+
+# Lambda with a custom domain
+# lambda_domain_name     = "signer.autorq.example"
+# lambda_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+# EC2 mode
+# vpc_id              = "vpc-..."
+# instance_subnet_ids = ["subnet-private-a", "subnet-private-b"]
+# alb_subnet_ids      = ["subnet-public-a", "subnet-public-b"]
+# ec2_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+# allowed_cidrs       = ["203.0.113.10/32"] # office + factory egress
