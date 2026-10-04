@@ -1,0 +1,15 @@
+/bin/
+/dist/
+*.zip
+*.pem
+*.key
+*.crt
+*.csr
+!internal/**/testdata/*.pem
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+.env
