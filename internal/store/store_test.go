@@ -206,6 +206,16 @@ func conformance(t *testing.T, s store.Store) {
 		}
 	})
 
+	t.Run("nonce", func(t *testing.T) {
+		exp := time.Now().Add(time.Minute)
+		if err := s.ClaimNonce(ctx, "n1", exp); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.ClaimNonce(ctx, "n1", exp); !errors.Is(err, store.ErrConflict) {
+			t.Errorf("replayed nonce: %v", err)
+		}
+	})
+
 	t.Run("audit", func(t *testing.T) {
 		if err := s.PutAudit(ctx, &model.AuditEvent{ID: "1", Time: now, Actor: "alice", Action: "issue"}); err != nil {
 			t.Fatal(err)

@@ -52,6 +52,9 @@ type Store interface {
 	ListCertificates(ctx context.Context, deviceID string) ([]*model.Certificate, error)
 	ListRevoked(ctx context.Context, env string) ([]*model.Certificate, error)
 
+	// ClaimNonce records a one-time auth nonce; ErrConflict if seen before.
+	ClaimNonce(ctx context.Context, nonce string, expires time.Time) error
+
 	PutAudit(ctx context.Context, e *model.AuditEvent) error
 	ListAudit(ctx context.Context, day time.Time) ([]*model.AuditEvent, error)
 }

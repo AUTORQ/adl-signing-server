@@ -17,6 +17,7 @@ type Memory struct {
 	chips   map[string]string
 	certs   map[string]model.Certificate
 	audit   []model.AuditEvent
+	nonces  map[string]time.Time
 }
 
 func NewMemory() *Memory {
@@ -25,6 +26,7 @@ func NewMemory() *Memory {
 		devices: map[string]model.Device{},
 		chips:   map[string]string{},
 		certs:   map[string]model.Certificate{},
+		nonces:  map[string]time.Time{},
 	}
 }
 
@@ -177,6 +179,22 @@ func (m *Memory) filterCerts(keep func(model.Certificate) bool) []*model.Certifi
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].IssuedAt.Before(out[j].IssuedAt) })
 	return out
+}
+
+func (m *Memory) ClaimNonce(_ context.Context, nonce string, expires time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for k, exp := range m.nonces {
+		if now.After(exp) {
+			delete(m.nonces, k)
+		}
+	}
+	if _, ok := m.nonces[nonce]; ok {
+		return ErrConflict
+	}
+	m.nonces[nonce] = expires
+	return nil
 }
 
 func (m *Memory) PutAudit(_ context.Context, e *model.AuditEvent) error {

@@ -362,6 +362,23 @@ func unmarshalCerts(items []map[string]types.AttributeValue) ([]*model.Certifica
 	return out, nil
 }
 
+// ClaimNonce writes a nonce marker that DynamoDB TTL cleans up later. The
+// table has TTL enabled on the "expires_at" attribute.
+func (d *Dynamo) ClaimNonce(ctx context.Context, nonce string, expires time.Time) error {
+	_, err := d.api.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(d.table),
+		Item: map[string]types.AttributeValue{
+			attrPK: s("NONCE#" + nonce), attrSK: s("NONCE"), attrType: s("nonce"),
+			"expires_at": &types.AttributeValueMemberN{Value: strconv.FormatInt(expires.Unix(), 10)},
+		},
+		ConditionExpression: aws.String("attribute_not_exists(pk)"),
+	})
+	if isConditionFailed(err) {
+		return ErrConflict
+	}
+	return err
+}
+
 func (d *Dynamo) PutAudit(ctx context.Context, e *model.AuditEvent) error {
 	item, err := attributevalue.MarshalMap(e)
 	if err != nil {
