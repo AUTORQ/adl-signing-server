@@ -2,11 +2,7 @@ package auth_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,61 +10,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 
 	"github.com/edge-labs/adl-signing-server/internal/auth"
+	"github.com/edge-labs/adl-signing-server/internal/auth/authtest"
 	"github.com/edge-labs/adl-signing-server/internal/store"
 )
 
-const (
-	testAKID   = "AKIDEXAMPLE"
-	testSecret = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
-	testARN    = "arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_ADLDeveloper_abc123/jane@autorq.com"
-)
-
-// fakeSTS verifies SigV4 exactly like STS would (re-signs with the known
-// secret and compares) and answers with a fixed identity.
-func fakeSTS(t *testing.T, arn string) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		if string(body) != "Action=GetCallerIdentity&Version=2011-06-15" {
-			http.Error(w, "bad body", 400)
-			return
-		}
-		authz := r.Header.Get("Authorization")
-		signedList := authz[strings.Index(authz, "SignedHeaders=")+len("SignedHeaders="):]
-		signedList = signedList[:strings.Index(signedList, ",")]
-
-		check, _ := http.NewRequest(r.Method, "http://"+r.Host+r.URL.RequestURI(), strings.NewReader(string(body)))
-		for _, h := range strings.Split(signedList, ";") {
-			if h == "host" || h == "content-length" {
-				continue
-			}
-			check.Header.Set(h, r.Header.Get(h))
-		}
-		ts, _ := time.Parse("20060102T150405Z", r.Header.Get("X-Amz-Date"))
-		sum := sha256.Sum256(body)
-		_ = v4.NewSigner().SignHTTP(context.Background(),
-			aws.Credentials{AccessKeyID: testAKID, SecretAccessKey: testSecret, SessionToken: r.Header.Get("X-Amz-Security-Token")},
-			check, hex.EncodeToString(sum[:]), "sts", "us-east-1", ts)
-		if check.Header.Get("Authorization") != authz {
-			w.WriteHeader(403)
-			fmt.Fprint(w, `<ErrorResponse><Error><Code>SignatureDoesNotMatch</Code><Message>nope</Message></Error></ErrorResponse>`)
-			return
-		}
-		fmt.Fprintf(w, `<GetCallerIdentityResponse><GetCallerIdentityResult><Arn>%s</Arn><UserId>AROA:jane</UserId><Account>111111111111</Account></GetCallerIdentityResult></GetCallerIdentityResponse>`, arn)
-	}))
-}
+const testARN = "arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_ADLDeveloper_abc123/jane@autorq.com"
 
 func setup(t *testing.T, arn string) (*auth.TokenSigner, *auth.STSVerifier) {
-	srv := fakeSTS(t, arn)
+	srv := authtest.NewSTS(arn)
 	t.Cleanup(srv.Close)
-	endpoint := func(string) string { return srv.URL + "/" }
+	endpoint := srv.Endpoint
 	signer := &auth.TokenSigner{
-		Credentials: credentials.NewStaticCredentialsProvider(testAKID, testSecret, "session-token"),
+		Credentials: authtest.Credentials(),
 		Region:      "us-east-1",
 		Audience:    "adl-signing-server",
 		Endpoint:    endpoint,
@@ -144,7 +101,7 @@ func TestAudienceAndSignature(t *testing.T) {
 	}
 
 	signer.Audience = "adl-signing-server"
-	signer.Credentials = credentials.NewStaticCredentialsProvider(testAKID, "wrong-secret", "")
+	signer.Credentials = credentials.NewStaticCredentialsProvider(authtest.AccessKeyID, "wrong-secret", "")
 	r = request(t, signer, "GET", "/v1/whoami", "")
 	if _, err := verifier.Authenticate(context.Background(), r, nil); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Errorf("bad signature accepted: %v", err)
