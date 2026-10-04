@@ -60,17 +60,20 @@ type Certificate struct {
 	Subject           string     `json:"subject" dynamodbav:"subject"`
 	Issuer            string     `json:"issuer" dynamodbav:"issuer"`
 	FingerprintSHA256 string     `json:"fingerprint_sha256" dynamodbav:"fingerprint_sha256"`
-	KeyAlgorithm      string     `json:"key_algorithm" dynamodbav:"key_algorithm"`
-	NotBefore         time.Time  `json:"not_before" dynamodbav:"not_before"`
-	NotAfter          time.Time  `json:"not_after" dynamodbav:"not_after"`
-	IssuedAt          time.Time  `json:"issued_at" dynamodbav:"issued_at"`
-	IssuedBy          string     `json:"issued_by" dynamodbav:"issued_by"`
-	KeyEscrowed       bool       `json:"key_escrowed" dynamodbav:"key_escrowed"`
-	Imported          bool       `json:"imported,omitempty" dynamodbav:"imported,omitempty"`
-	ArchivePrefix     string     `json:"archive_prefix" dynamodbav:"archive_prefix"`
-	RevokedAt         *time.Time `json:"revoked_at,omitempty" dynamodbav:"revoked_at,omitempty"`
-	RevokedBy         string     `json:"revoked_by,omitempty" dynamodbav:"revoked_by,omitempty"`
-	RevocationReason  string     `json:"revocation_reason,omitempty" dynamodbav:"revocation_reason,omitempty"`
+	// AuthorityKeyID (hex) ties the cert to the CA that signed it, which
+	// matters for CRLs once a CA has been rotated.
+	AuthorityKeyID   string     `json:"authority_key_id" dynamodbav:"authority_key_id"`
+	KeyAlgorithm     string     `json:"key_algorithm" dynamodbav:"key_algorithm"`
+	NotBefore        time.Time  `json:"not_before" dynamodbav:"not_before"`
+	NotAfter         time.Time  `json:"not_after" dynamodbav:"not_after"`
+	IssuedAt         time.Time  `json:"issued_at" dynamodbav:"issued_at"`
+	IssuedBy         string     `json:"issued_by" dynamodbav:"issued_by"`
+	KeyEscrowed      bool       `json:"key_escrowed" dynamodbav:"key_escrowed"`
+	Imported         bool       `json:"imported,omitempty" dynamodbav:"imported,omitempty"`
+	ArchivePrefix    string     `json:"archive_prefix" dynamodbav:"archive_prefix"`
+	RevokedAt        *time.Time `json:"revoked_at,omitempty" dynamodbav:"revoked_at,omitempty"`
+	RevokedBy        string     `json:"revoked_by,omitempty" dynamodbav:"revoked_by,omitempty"`
+	RevocationReason string     `json:"revocation_reason,omitempty" dynamodbav:"revocation_reason,omitempty"`
 }
 
 // AuditEvent records a security relevant action. Every issuance, key
