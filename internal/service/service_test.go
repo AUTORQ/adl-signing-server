@@ -56,7 +56,7 @@ func newHarness(t *testing.T, install bool) *harness {
 		Store: h.store, Archive: h.archive, CAs: cas, Organization: "EDGE Labs",
 		Envs: []service.EnvConfig{
 			{Name: "dev", DevicePrefix: "DVTADL", Validity: 10 * 365 * 24 * time.Hour, AllowKeyEscrow: true},
-			{Name: "prod", DevicePrefix: "DVTADL", Validity: 10 * 365 * 24 * time.Hour},
+			{Name: "prod", DevicePrefix: "DVTADL", Validity: 10 * 365 * 24 * time.Hour, RequireChipID: true},
 		},
 	})
 	if err != nil {
@@ -231,7 +231,10 @@ func TestPermissionsAndEscrowPolicy(t *testing.T) {
 	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "prod", CSR: csr}); errCode(err) != "forbidden" {
 		t.Errorf("developer issued prod: %v", err)
 	}
-	if _, err := h.svc.Issue(ctx, station, model.IssueRequest{Env: "prod", CSR: csr, PrivateKey: keyPEM(t, key)}); errCode(err) != "bad_request" {
+	if _, err := h.svc.Issue(ctx, station, model.IssueRequest{Env: "prod", CSR: csr}); errCode(err) != "bad_request" {
+		t.Errorf("prod issued without a chip id: %v", err)
+	}
+	if _, err := h.svc.Issue(ctx, station, model.IssueRequest{Env: "prod", CSR: csr, ChipID: "f412fa000001", PrivateKey: keyPEM(t, key)}); errCode(err) != "bad_request" {
 		t.Errorf("prod accepted an escrowed key: %v", err)
 	}
 	other, _ := csrFor(t, "")
@@ -250,7 +253,14 @@ func TestExplicitIDBumpsSequenceAndReplace(t *testing.T) {
 	h := newHarness(t, true)
 	ctx := context.Background()
 	_, csr := csrFor(t, "")
-	first, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr, DeviceID: "DVTADL050"})
+	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr, DeviceID: "DVTADL050"}); errCode(err) != "bad_request" {
+		t.Errorf("developer pinned a managed id: %v", err)
+	}
+	// Ids outside the managed range are fine (bench jigs and the like).
+	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr, DeviceID: "BENCH-JIG-01"}); err != nil {
+		t.Errorf("custom id: %v", err)
+	}
+	first, err := h.svc.Issue(ctx, admin, model.IssueRequest{Env: "dev", CSR: csr, DeviceID: "DVTADL050"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +467,7 @@ func TestListDevicesScopedToPermissions(t *testing.T) {
 	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: a}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.svc.Issue(ctx, station, model.IssueRequest{Env: "prod", CSR: b}); err != nil {
+	if _, err := h.svc.Issue(ctx, station, model.IssueRequest{Env: "prod", CSR: b, ChipID: "f412fa000002"}); err != nil {
 		t.Fatal(err)
 	}
 	list, err := h.svc.ListDevices(ctx, developer, "")

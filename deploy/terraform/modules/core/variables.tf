@@ -14,6 +14,7 @@ variable "environments" {
     device_prefix      = string
     validity_days      = number
     allow_key_escrow   = bool
+    require_chip_id    = optional(bool, false)
     device_id_digits   = optional(number, 3)
     crl_validity_hours = optional(number, 168)
     ca_key_spec        = optional(string, "RSA_4096")
@@ -28,6 +29,7 @@ variable "environments" {
       device_prefix    = "DVTADL"
       validity_days    = 3650
       allow_key_escrow = false
+      require_chip_id  = true
     }
   }
 

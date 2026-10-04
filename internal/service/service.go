@@ -40,7 +40,10 @@ type EnvConfig struct {
 	// On for dev so people stop losing keys, off for prod where keys
 	// should only ever exist on the device.
 	AllowKeyEscrow bool
-	CRLValidity    time.Duration
+	// RequireChipID refuses certificates that are not bound to a chip.
+	// On for prod, so prod identities only ever exist for real hardware.
+	RequireChipID bool
+	CRLValidity   time.Duration
 }
 
 type Options struct {
@@ -232,6 +235,11 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 	if err != nil {
 		return nil, err
 	}
+	// New devices must arrive with their chip; a replacement can lean on
+	// the chip already recorded (checked once the device is loaded).
+	if env.RequireChipID && chip == "" && !req.Replace {
+		return nil, badRequest("%s certificates must be bound to a chip; chip_id is required", env.Name)
+	}
 	if err := checkLabels(req.Labels); err != nil {
 		return nil, err
 	}
@@ -258,6 +266,11 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 		dev, err = s.store.GetDevice(ctx, id)
 		switch {
 		case errors.Is(err, store.ErrNotFound):
+			// Numbers in the managed range come from the allocator, so
+			// nobody can claim DVTADL99999 and push the counter out.
+			if _, managed := sequenceNumber(env.DevicePrefix, id); managed && !p.Can("admin:import") {
+				return nil, badRequest("ids starting with %s are allocated by the server; leave device_id empty", env.DevicePrefix)
+			}
 			dev = &model.Device{ID: id, Env: env.Name, Status: model.DevicePending, ChipID: chip,
 				Owner: p.Name(), Labels: req.Labels, CreatedAt: now, UpdatedAt: now}
 			if err := s.store.CreateDevice(ctx, dev); err != nil {
@@ -300,6 +313,10 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 			}
 			replaced = dev.CurrentSerial
 		}
+	}
+
+	if env.RequireChipID && dev.ChipID == "" {
+		return nil, badRequest("%s certificates must be bound to a chip; chip_id is required", env.Name)
 	}
 
 	cert, err := iss.IssueDevice(dev.ID, csr.PublicKey, pki.DeviceProfile{

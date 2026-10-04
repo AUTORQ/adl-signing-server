@@ -36,7 +36,7 @@ type Stack struct {
 // Envs mirrors the production defaults.
 var Envs = []service.EnvConfig{
 	{Name: "dev", DevicePrefix: "DVTADL", Validity: 3650 * 24 * time.Hour, AllowKeyEscrow: true},
-	{Name: "prod", DevicePrefix: "DVTADL", Validity: 3650 * 24 * time.Hour},
+	{Name: "prod", DevicePrefix: "DVTADL", Validity: 3650 * 24 * time.Hour, RequireChipID: true},
 }
 
 // New builds the stack and runs the CA ceremony for every environment.

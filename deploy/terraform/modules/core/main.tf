@@ -32,6 +32,7 @@ locals {
     device_id_digits   = e.device_id_digits
     validity_days      = e.validity_days
     allow_key_escrow   = e.allow_key_escrow
+    require_chip_id    = e.require_chip_id
     crl_validity_hours = e.crl_validity_hours
   }]
 

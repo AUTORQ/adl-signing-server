@@ -24,6 +24,7 @@ type Environment struct {
 	DeviceIDDigits int    `json:"device_id_digits,omitempty"`
 	ValidityDays   int    `json:"validity_days"`
 	AllowKeyEscrow bool   `json:"allow_key_escrow"`
+	RequireChipID  bool   `json:"require_chip_id,omitempty"`
 	CRLValidityHrs int    `json:"crl_validity_hours,omitempty"`
 }
 
@@ -132,6 +133,7 @@ func (c *Server) ServiceEnvs() []service.EnvConfig {
 			Name: e.Name, DevicePrefix: e.DevicePrefix, DeviceIDDigits: e.DeviceIDDigits,
 			Validity:       time.Duration(e.ValidityDays) * 24 * time.Hour,
 			AllowKeyEscrow: e.AllowKeyEscrow,
+			RequireChipID:  e.RequireChipID,
 			CRLValidity:    time.Duration(e.CRLValidityHrs) * time.Hour,
 		})
 	}

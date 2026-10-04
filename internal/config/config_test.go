@@ -18,7 +18,7 @@ func setValid(t *testing.T) {
 	t.Setenv("ADL_AUTH_AUDIENCE", "adl-signing-server:123456789012")
 	t.Setenv("ADL_ENVIRONMENTS", `[
 		{"name":"dev","kms_key_id":"arn:dev","device_prefix":"DVTADL","device_id_digits":3,"validity_days":3650,"allow_key_escrow":true,"crl_validity_hours":168},
-		{"name":"prod","kms_key_id":"arn:prod","device_prefix":"DVTADL","device_id_digits":3,"validity_days":3650,"allow_key_escrow":false,"crl_validity_hours":168}
+		{"name":"prod","kms_key_id":"arn:prod","device_prefix":"DVTADL","device_id_digits":3,"validity_days":3650,"allow_key_escrow":false,"require_chip_id":true,"crl_validity_hours":168}
 	]`)
 	t.Setenv("ADL_AUTH_POLICY", `{"accounts":["123456789012"],"bindings":[{"roles":["adl-developer"],"users":[],"permissions":["dev:issue","dev:read"]}]}`)
 }
@@ -33,7 +33,7 @@ func TestLoad(t *testing.T) {
 		t.Errorf("prod key %q", k)
 	}
 	envs := c.ServiceEnvs()
-	if len(envs) != 2 || !envs[0].AllowKeyEscrow || envs[1].AllowKeyEscrow || envs[0].Validity != 3650*24*time.Hour {
+	if len(envs) != 2 || !envs[0].AllowKeyEscrow || envs[1].AllowKeyEscrow || !envs[1].RequireChipID || envs[0].Validity != 3650*24*time.Hour {
 		t.Errorf("envs %+v", envs)
 	}
 	if len(c.AuthSTSRegions) != 1 || c.AuthSTSRegions[0] != "us-east-1" {
