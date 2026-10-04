@@ -83,7 +83,9 @@ variables {
 run "lambda_only" {
   command = plan
   variables {
-    deployment_mode = "lambda"
+    deployment_mode                    = "lambda"
+    create_client_roles                = true
+    client_role_trusted_principal_arns = ["arn:aws:iam::123456789012:user/jane"]
   }
   assert {
     condition     = length(module.lambda) == 1 && length(module.ec2) == 0
@@ -135,8 +137,8 @@ run "both" {
     error_message = "both mode should create both"
   }
   assert {
-    condition     = length(jsondecode(module.core.server_environment["ADL_AUTH_POLICY"]).bindings) == 4
-    error_message = "extra bindings should be appended"
+    condition     = length(jsondecode(module.core.server_environment["ADL_AUTH_POLICY"]).bindings) == 1
+    error_message = "with no client roles only the explicit bindings should be present"
   }
 }
 

@@ -27,8 +27,8 @@ architecture.md. Switching later is just a variable change. The keys,
 registry and archive stay put, and only the front end is added or removed.
 
 EC2 needs `vpc_id`, private `instance_subnet_ids` with outbound HTTPS (NAT,
-or VPC endpoints for STS, KMS, DynamoDB, S3, SSM, ssmmessages, ec2messages
-and logs), `alb_subnet_ids`, and an ACM certificate. Point a DNS name at
+or VPC endpoints for STS, KMS, DynamoDB, S3 and logs, plus SSM,
+ssmmessages and ec2messages if you turn on Session Manager), `alb_subnet_ids`, and an ACM certificate. Point a DNS name at
 `alb_dns_name`.
 
 For Lambda with your own hostname, set `lambda_domain_name` and
@@ -37,7 +37,9 @@ This turns off the default `execute-api` URL.
 
 ### Binding people
 
-Prefer IAM Identity Center permission sets over the created `adl-*` roles:
+Prefer IAM Identity Center permission sets. The `adl-*` roles are off by
+default, and when you turn them on you must name exactly who may assume them
+(`client_role_trusted_principal_arns`); there's no account-wide trust.
 
 ```hcl
 auth_bindings = [
@@ -69,7 +71,7 @@ template version and the ASG rolls the instances (50% minimum healthy).
 | revoke | `adl revoke DVTADL031 --reason keyCompromise` |
 | server logs (Lambda) | CloudWatch `/aws/lambda/adl-signer`, API access logs in `/aws/apigateway/adl-signer` |
 | server logs (EC2) | CloudWatch `/adl/adl-signer`, one stream per instance |
-| shell on an instance | `aws ssm start-session --target i-…` |
+| shell on an instance | set `enable_ssm_session_access = true`, apply, `aws ssm start-session --target i-…`, then turn it off again |
 
 Every log line is JSON and carries a `request_id`. The CLI prints the request
 ID on errors, so grep for it.

@@ -1,12 +1,18 @@
 region          = "us-east-1"
 deployment_mode = "lambda" # or "ec2" or "both"
 
-# Bind IAM Identity Center permission sets instead of (or as well as) the
-# adl-* roles the core module creates.
+# Recommended: bind IAM Identity Center permission sets. The permission sets
+# need no AWS permissions of their own for this.
 # auth_bindings = [
 #   { roles = ["AWSReservedSSO_ADLDeveloper_*"], permissions = ["dev:issue", "dev:read", "dev:key-read"] },
 #   { roles = ["AWSReservedSSO_ADLCAAdmin_*"],   permissions = ["*"] },
 # ]
+
+# Or/also: create adl-developer / adl-factory-station / adl-ca-admin roles,
+# assumable only by the principals listed (no account-wide trust).
+# create_client_roles                = true
+# client_role_trusted_principal_arns = ["arn:aws:iam::123456789012:user/jane"]
+# factory_station_trust_anchor_arns  = ["arn:aws:rolesanywhere:us-east-1:123456789012:trust-anchor/..."]
 
 # break_glass_role_arns = ["arn:aws:iam::123456789012:role/adl-break-glass"]
 

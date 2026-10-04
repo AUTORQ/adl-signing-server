@@ -85,3 +85,14 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "enable_ssm_session_access" {
+  description = <<-EOT
+    Attach AmazonSSMManagedInstanceCore so admins can open a shell with
+    Session Manager. Off by default: a shell on the instance is a shell
+    holding the role that can sign with the CA keys. Turn on temporarily
+    for debugging and restrict ssm:StartSession to a break-glass role.
+  EOT
+  type        = bool
+  default     = false
+}

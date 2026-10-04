@@ -108,19 +108,33 @@ variable "auth_bindings" {
 }
 
 variable "create_client_roles" {
-  description = "Create the adl-developer, adl-factory-station and adl-ca-admin roles."
+  description = <<-EOT
+    Create the adl-developer, adl-factory-station and adl-ca-admin roles.
+    Not needed if people sign in with IAM Identity Center: bind the
+    permission sets directly with auth_bindings instead.
+  EOT
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "client_role_trusted_principal_arns" {
-  description = "Who may assume the client roles. Defaults to this account (i.e. anyone IAM allows)."
+  description = "Exact principals (IAM users/roles) allowed to assume the client roles. Required when create_client_roles is on; there is deliberately no account-wide default."
+  type        = list(string)
+  default     = []
+}
+
+variable "factory_station_trust_anchor_arns" {
+  description = "IAM Roles Anywhere trust anchors whose certificates may assume adl-factory-station."
   type        = list(string)
   default     = []
 }
 
 variable "client_role_require_mfa" {
-  description = "Require MFA to assume the developer and CA admin roles."
+  description = <<-EOT
+    Require MFA to assume the developer and CA admin roles. Only works for
+    IAM-user callers: IAM Identity Center sessions don't carry the MFA flag,
+    which is another reason to bind SSO permission sets via auth_bindings.
+  EOT
   type        = bool
   default     = true
 }

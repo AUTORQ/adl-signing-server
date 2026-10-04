@@ -68,17 +68,23 @@ request (digest), a second time (nonce), or after five minutes (timestamp).
 | `admin:import` | import legacy certs, pin DVTADL ids |
 | `audit:read` | read the audit log |
 
-Default bindings: `adl-developer` → `dev:issue dev:read dev:key-read`,
-`adl-factory-station` → `prod:issue prod:read prod:provision`,
-`adl-ca-admin` → `*`.
+Recommended: bind IAM Identity Center permission sets with `auth_bindings`.
+AWS sets the role session name to the person's username, so the audit log
+shows who really did it. Optionally (`create_client_roles = true`) Terraform
+also creates `adl-developer` → `dev:issue dev:read dev:key-read`,
+`adl-factory-station` → `prod:issue prod:read prod:provision` and
+`adl-ca-admin` → `*`. Those roles are assumable only by the principals you
+list (and, for the station role, by IAM Roles Anywhere trust anchors).
 
 ## Device identity rules
 
 - IDs with the environment's prefix (`DVTADL`) come from an atomic
   counter. Dev and prod share it, as they did on the droplet. Only admins
   can pin one. Imports move the counter past whatever they bring in.
-- A chip MAC is claimed by exactly one device (a conditional write in a
-  DynamoDB transaction). Prod requires a chip ID on every cert.
+- Within an environment, a chip MAC is claimed by exactly one device (a
+  conditional write in a DynamoDB transaction). Claims are per environment,
+  so a dev cert can't squat on a production chip. Prod requires a chip ID
+  on every cert.
 - Re-issuing revokes the previous cert as `superseded`. A device that's
   already `provisioned` can only be re-keyed by someone with `revoke`.
 - Device cert profile, unchanged from the droplet: `O=EDGE Labs,

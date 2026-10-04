@@ -38,9 +38,24 @@ variable "kms_admin_principal_arns" {
   default = []
 }
 
+variable "create_client_roles" {
+  type    = bool
+  default = false
+}
+
 variable "client_role_trusted_principal_arns" {
   type    = list(string)
   default = []
+}
+
+variable "factory_station_trust_anchor_arns" {
+  type    = list(string)
+  default = []
+}
+
+variable "enable_ssm_session_access" {
+  type    = bool
+  default = false
 }
 
 variable "backup_copy_vault_arn" {

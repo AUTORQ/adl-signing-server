@@ -10,6 +10,19 @@ data "aws_iam_policy_document" "service" {
     resources = [aws_dynamodb_table.registry.arn, "${aws_dynamodb_table.registry.arn}/index/*"]
   }
 
+  # Without ListBucket S3 answers 403 instead of 404 for missing keys,
+  # and the service relies on telling "not there yet" apart from "denied".
+  statement {
+    sid       = "ArchiveList"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.archive.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["certificates/*", "escrow/*", "ca/*"]
+    }
+  }
+
   statement {
     sid       = "Archive"
     actions   = ["s3:GetObject", "s3:PutObject"]
@@ -97,31 +110,63 @@ locals {
     "ca-admin"        = { mfa = var.client_role_require_mfa, description = "CA ceremony, revocation, import, audit" }
   } : {}
 
-  client_trust = length(var.client_role_trusted_principal_arns) > 0 ? var.client_role_trusted_principal_arns : [local.root_arn]
+  # No account-root fallback: trusting root would let anyone in the
+  # account with a broad sts:AssumeRole grant become a factory station.
+  client_trust = var.client_role_trusted_principal_arns
 }
 
 data "aws_iam_policy_document" "client_trust" {
   for_each = local.client_roles
 
-  statement {
-    actions = ["sts:AssumeRole", "sts:SetSourceIdentity", "sts:TagSession"]
-    principals {
-      type        = "AWS"
-      identifiers = local.client_trust
+  # Factory PCs authenticating with an X.509 cert via IAM Roles Anywhere.
+  dynamic "statement" {
+    for_each = each.key == "factory-station" && length(var.factory_station_trust_anchor_arns) > 0 ? [1] : []
+    content {
+      sid     = "RolesAnywhere"
+      actions = ["sts:AssumeRole", "sts:SetSourceIdentity", "sts:TagSession"]
+      principals {
+        type        = "Service"
+        identifiers = ["rolesanywhere.amazonaws.com"]
+      }
+      condition {
+        test     = "ArnEquals"
+        variable = "aws:SourceArn"
+        values   = var.factory_station_trust_anchor_arns
+      }
     }
-    dynamic "condition" {
-      for_each = each.value.mfa ? [1] : []
-      content {
-        test     = "Bool"
-        variable = "aws:MultiFactorAuthPresent"
-        values   = ["true"]
+  }
+
+  dynamic "statement" {
+    for_each = length(local.client_trust) > 0 ? [1] : []
+    content {
+      sid     = "TrustedPrincipals"
+      actions = ["sts:AssumeRole", "sts:SetSourceIdentity", "sts:TagSession"]
+      principals {
+        type        = "AWS"
+        identifiers = local.client_trust
+      }
+      dynamic "condition" {
+        for_each = each.value.mfa ? [1] : []
+        content {
+          test     = "Bool"
+          variable = "aws:MultiFactorAuthPresent"
+          values   = ["true"]
+        }
       }
     }
   }
 }
 
 resource "aws_iam_role" "client" {
-  for_each             = local.client_roles
+  for_each = local.client_roles
+
+  lifecycle {
+    precondition {
+      condition     = length(var.client_role_trusted_principal_arns) > 0 || (each.key == "factory-station" && length(var.factory_station_trust_anchor_arns) > 0)
+      error_message = "Set client_role_trusted_principal_arns (or factory_station_trust_anchor_arns for the station role), or set create_client_roles = false and bind SSO permission sets via auth_bindings."
+    }
+  }
+
   name                 = "adl-${each.key}"
   description          = each.value.description
   assume_role_policy   = data.aws_iam_policy_document.client_trust[each.key].json

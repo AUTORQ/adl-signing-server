@@ -49,12 +49,14 @@ This is the factory step that gives a production board its identity.
 
 The station needs AWS credentials that resolve to a role bound to
 `prod:issue`, `prod:provision` and `prod:read`. The `adl-factory-station`
-role from Terraform is exactly that. Options, best first:
+role (Terraform `create_client_roles = true`) is exactly that. Options,
+best first:
 
 1. **IAM Roles Anywhere.** The station holds an X.509 cert (ideally in a TPM)
    and swaps it for short-lived `adl-factory-station` credentials through
    `credential_process` in `~/.aws/config`. There's no long-lived secret on
-   the PC, and revoking the station cert cuts it off.
+   the PC, and revoking the station cert cuts it off. Put the trust anchor
+   ARN in `factory_station_trust_anchor_arns`.
 2. **IAM Identity Center.** Operators sign in at the start of a shift with a
    permission set bound to the station permissions. That gives a per-person
    audit trail, but needs a browser login each day.

@@ -75,8 +75,9 @@ it's worth protecting. Mitigations:
 
 ### EC2 specifics
 
-No SSH: shell access is SSM Session Manager, which is audited. IMDSv2
-only, hop limit 1. Encrypted EBS. The binary is fetched from S3 and checked
+No SSH. Session Manager is off by default, because a shell on the instance
+holds the role that can sign with the CA keys. Turn it on temporarily and
+only for a break-glass role. IMDSv2 only, hop limit 1. Encrypted EBS. The binary is fetched from S3 and checked
 against a SHA-256 pinned in the launch template. It runs as an
 unprivileged user with a locked-down systemd sandbox. The instance security
 group only allows the ALB.
@@ -90,7 +91,18 @@ group only allows the ALB.
 - **SCPs** in the AWS org preventing `kms:ScheduleKeyDeletion` on the CA
   keys and `s3:BypassGovernanceRetention`, except from a break-glass role.
 - **Separate account.** Run this in its own AWS account with very few
-  admins. It's the most sensitive thing in the device stack.
+  admins. It's the most sensitive thing in the device stack. By default the
+  KMS key admins are "the account" (so Terraform can manage the keys),
+  which means any account admin could rewrite a CA key policy. Either
+  accept that in a dedicated account, or set `kms_admin_principal_arns`
+  to the Terraform deploy role only.
+- **Trustworthy names in the audit log.** The actor is `role/session`.
+  With IAM Identity Center the session name is set by AWS. With the
+  optional `adl-*` roles the caller picks their own session name, so either
+  stick to Identity Center or add an `sts:RoleSessionName` /
+  `sts:SourceIdentity` condition to those trust policies that fits how
+  AutorQ's people sign in. The full ARN, including the source principal, is
+  in CloudTrail either way.
 - **Station hardening.** Use full-disk encryption, a dedicated OS user, and
   IAM Roles Anywhere with the station key in a TPM.
 - **Firmware.** Secure Boot v2 and flash encryption at end of line (see

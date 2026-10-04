@@ -12,7 +12,9 @@ module "core" {
   auth_bindings                      = var.auth_bindings
   break_glass_role_arns              = var.break_glass_role_arns
   kms_admin_principal_arns           = var.kms_admin_principal_arns
+  create_client_roles                = var.create_client_roles
   client_role_trusted_principal_arns = var.client_role_trusted_principal_arns
+  factory_station_trust_anchor_arns  = var.factory_station_trust_anchor_arns
   backup_copy_vault_arn              = var.backup_copy_vault_arn
 }
 
@@ -44,5 +46,7 @@ module "ec2" {
   internal_alb        = var.internal_alb
   allowed_cidrs       = var.allowed_cidrs
   certificate_arn     = var.ec2_certificate_arn
-  log_kms_key_arn     = module.core.data_kms_key_arn
+
+  enable_ssm_session_access = var.enable_ssm_session_access
+  log_kms_key_arn           = module.core.data_kms_key_arn
 }

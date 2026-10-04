@@ -94,9 +94,10 @@ resource "aws_iam_role_policy" "instance" {
   policy = data.aws_iam_policy_document.instance.json
 }
 
-# Shell access is through SSM Session Manager only; there is no SSH key
-# and port 22 is closed.
+# No SSH key and port 22 is closed. Session Manager is opt-in, see
+# enable_ssm_session_access.
 resource "aws_iam_role_policy_attachment" "ssm" {
+  count      = var.enable_ssm_session_access ? 1 : 0
   role       = var.role_name
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
