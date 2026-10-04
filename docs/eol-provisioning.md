@@ -6,19 +6,19 @@ This is the factory step that gives a production board its identity.
 
 `adl eol provision` does this for each board on the fixture:
 
-1. **Reads the chip's factory MAC** with `esptool read_mac`. The MAC is the
+1. Reads the chip's factory MAC with `esptool read_mac`. The MAC is the
    chip's permanent ID in the registry, and one chip can only ever hold one
    device identity.
-2. **Generates an RSA-2048 key on the station**, in memory.
-3. **Sends only the CSR and MAC** to the signer. The server allocates the
+2. Generates an RSA-2048 key on the station, in memory.
+3. Sends only the CSR and MAC to the signer. The server allocates the
    next device ID (DVTADL0xx), signs with the prod CA key in KMS and records
    the chip binding. The prod environment refuses to escrow keys and refuses
    certs without a chip ID.
-4. **Writes key and certs to a private tmpfs dir** (`/dev/shm/adl-eol-*`,
-   mode 0700) and runs the **flash script**, then the optional **verify
-   script**.
-5. **Wipes the tmpfs dir.** The key now exists only on the chip.
-6. **Confirms back to the server** with the serial it flashed. The device
+4. Writes key and certs to a private tmpfs dir (`/dev/shm/adl-eol-*`,
+   mode 0700) and runs the flash script, then the optional verify
+   script.
+5. Wipes the tmpfs dir. The key now exists only on the chip.
+6. Confirms back to the server with the serial it flashed. The device
    moves from `issued` to `provisioned`, stamped with station, firmware
    version and time.
 7. Prints a big PASS/FAIL and appends a line to the station's CSV log
@@ -30,7 +30,7 @@ This is the factory step that gives a production board its identity.
 |---|---|---|
 | flash/verify script fails, cable pulled, power cut | fix it, run again on the same board | server sees the chip already has an *unconfirmed* identity and re-keys that same identity. The previous cert is revoked as superseded. Same DVTADL number |
 | board was already provisioned and comes back down the line | stop, find out why | refused with "already provisioned as DVTADL0xx" |
-| deliberately re-keying a shipped/returned board | a CA admin runs with `--reissue` | needs `prod:revoke`, which stations don't have |
+| re-keying a shipped or returned board on purpose | a CA admin runs with `--reissue` | needs `prod:revoke`, which stations don't have |
 | server unreachable | check network/creds, re-run | nothing was written to the board yet |
 
 ## Station setup
@@ -38,7 +38,7 @@ This is the factory step that gives a production board its identity.
 ### Hardware/software
 
 - Linux PC (any distro with `/dev/shm`) with USB to the fixture.
-- Python + `esptool` and `esp-secure-cert-tool`, **pinned to tested versions**:
+- Python + `esptool` and `esp-secure-cert-tool`, pinned to tested versions:
   ```sh
   pip install esptool==<ver> esp-secure-cert-tool==<ver>
   ```
@@ -52,12 +52,12 @@ The station needs AWS credentials that resolve to a role bound to
 role (Terraform `create_client_roles = true`) is exactly that. Options,
 best first:
 
-1. **IAM Roles Anywhere.** The station holds an X.509 cert (ideally in a TPM)
+1. IAM Roles Anywhere. The station holds an X.509 cert (ideally in a TPM)
    and swaps it for short-lived `adl-factory-station` credentials through
    `credential_process` in `~/.aws/config`. There's no long-lived secret on
    the PC, and revoking the station cert cuts it off. Put the trust anchor
    ARN in `factory_station_trust_anchor_arns`.
-2. **IAM Identity Center.** Operators sign in at the start of a shift with a
+2. IAM Identity Center. Operators sign in at the start of a shift with a
    permission set bound to the station permissions. That gives a per-person
    audit trail, but needs a browser login each day.
 3. Not long-lived IAM user keys on the station PC.
@@ -87,8 +87,8 @@ adl eol provision --port /dev/ttyUSB0 --firmware 1.4.2 --loop
 `scripts/eol/flash-esp32s3.sh` is the default. It uses Espressif's
 `configure_esp_secure_cert.py` to:
 
-- encrypt the device private key for the S3's **Digital Signature (DS)
-  peripheral** with an HMAC key it **burns into an eFuse block**, and
+- encrypt the device private key for the S3's Digital Signature (DS)
+  peripheral with an HMAC key it burns into an eFuse block, and
 - write the cert, CA and encrypted key into the `esp_secure_cert` partition.
 
 With DS the plaintext key never lands in flash. Firmware can only *use* it
@@ -127,9 +127,9 @@ handshake to the cloud with its new cert".
 
 These aren't done by the signer, but a production line should have them:
 
-- **Secure Boot v2** enabled and the key digest burned, so only signed
+- Secure Boot v2 enabled and the key digest burned, so only signed
   firmware runs.
-- **Flash encryption** in release mode.
+- Flash encryption in release mode.
 - JTAG and the UART download mode locked down after provisioning
   (`DIS_PAD_JTAG`, `DIS_DOWNLOAD_MODE` / secure download mode), as the
   product allows.

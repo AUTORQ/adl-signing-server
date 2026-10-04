@@ -38,7 +38,7 @@ data "aws_iam_policy_document" "ca_key" {
     }
   }
 
-  # Belt and braces: even if someone later adds a broad statement, only the
+  # Extra guard: even if someone later adds a broad statement, only the
   # service roles can produce signatures with the CA key.
   statement {
     sid       = "OnlyServiceSigns"

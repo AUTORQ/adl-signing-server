@@ -71,7 +71,7 @@ template version and the ASG rolls the instances (50% minimum healthy).
 | revoke | `adl revoke DVTADL031 --reason keyCompromise` |
 | server logs (Lambda) | CloudWatch `/aws/lambda/adl-signer`, API access logs in `/aws/apigateway/adl-signer` |
 | server logs (EC2) | CloudWatch `/adl/adl-signer`, one stream per instance |
-| shell on an instance | set `enable_ssm_session_access = true`, apply, `aws ssm start-session --target i-…`, then turn it off again |
+| shell on an instance | set `enable_ssm_session_access = true`, apply, `aws ssm start-session --target i-0123...`, then turn it off again |
 
 Every log line is JSON and carries a `request_id`. The CLI prints the request
 ID on errors, so grep for it.

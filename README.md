@@ -3,37 +3,37 @@
 Issues and tracks the X.509 identities of ADL devices (ESP32-S3). It replaces
 the hand-run openssl scripts on the old signing droplet.
 
-- **Developers** get a dev certificate with one command, and can get it back
+- Developers get a dev certificate with one command, and can get it back
   later if they lose it.
-- **The factory line** provisions production boards at end of line. The key is
+- The factory line provisions production boards at end of line. The key is
   generated on the station, written to the chip, never stored anywhere else,
   and recorded against the chip's MAC.
-- **The CA keys live in AWS KMS** and cannot be exported. Only the service
+- The CA keys live in AWS KMS and cannot be exported. Only the service
   role can sign with them.
-- **Every certificate is archived** in a versioned, Object Locked S3 bucket.
+- Every certificate is archived in a versioned, Object Locked S3 bucket.
   A DynamoDB registry records who issued what, when and for which chip.
-- **It runs as a Lambda or on EC2, or both at once**, from the same binary
+- It runs as a Lambda or on EC2, or both at once, from the same binary
   and the same Terraform.
 
 ```
  developer laptop          factory station                  CA admin
    adl mint                adl eol provision                adl ca / revoke / audit
-      │                          │  esptool + flash script        │
-      └────────────┬─────────────┴────────────────────────────────┘
-                   │  HTTPS, caller proves its AWS IAM identity (SigV4-signed STS token)
-          ┌────────▼─────────┐        ┌──────────────────────────┐
-          │ API Gateway      │   or   │ ALB + WAF                │
-          │  → Lambda        │        │  → EC2 ASG (systemd)     │
-          └────────┬─────────┘        └────────────┬─────────────┘
-                   └──────────── adl-signer ───────┘
-                    │            │              │
+      |                          |  esptool + flash script        |
+      +------------+-------------+--------------------------------+
+                   |  HTTPS, caller proves its AWS IAM identity (SigV4-signed STS token)
+          +--------v---------+        +--------------------------+
+          | API Gateway      |   or   | ALB + WAF                |
+          |  -> Lambda       |        |  -> EC2 ASG (systemd)    |
+          +--------+---------+        +------------+-------------+
+                   +------------ adl-signer -------+
+                    |            |              |
              KMS CA keys    DynamoDB       S3 archive (versioned, Object Lock)
              (dev, prod)    registry       certs, chains, CRLs, escrowed dev keys
 ```
 
 ## Quick start by role
 
-**Developer, minting a cert for a dev board:**
+### Developer, minting a cert for a dev board
 
 ```sh
 aws sso login --profile autorq-dev     # or however you normally get AWS creds
@@ -46,7 +46,7 @@ adl fetch DVTADL017                    # lost it? get it back
 
 See [docs/developer-guide.md](docs/developer-guide.md).
 
-**Factory station:**
+### Factory station
 
 ```sh
 adl eol check --station line-1
@@ -56,12 +56,16 @@ adl eol provision --station line-1 --port /dev/ttyUSB0 --firmware 1.4.2 --loop
 See [docs/eol-provisioning.md](docs/eol-provisioning.md). Read the eFuse
 warning there before running this on real boards.
 
-**Standing it up (once):** [docs/operations.md](docs/operations.md), then the
-CA ceremony and the migration off the droplet in
+### Setting it up the first time
+
+Deploy with [docs/operations.md](docs/operations.md), then do the CA
+ceremony and the move off the droplet in
 [docs/ca-ceremony.md](docs/ca-ceremony.md).
 
-**Why things are the way they are:** [docs/architecture.md](docs/architecture.md)
-and [docs/security.md](docs/security.md).
+### Background
+
+How it fits together is in [docs/architecture.md](docs/architecture.md),
+and the security reasoning is in [docs/security.md](docs/security.md).
 
 ## Repository layout
 
@@ -75,7 +79,7 @@ internal/auth/           IAM identity verification and the permission policy
 internal/store/          DynamoDB registry (and an in-memory one)
 internal/archive/        S3 archive (and an in-memory one)
 internal/api/            HTTP handlers
-internal/lambdahttp/     API Gateway v2 → http.Handler adapter
+internal/lambdahttp/     API Gateway v2 -> http.Handler adapter
 internal/eol/            end-of-line station logic
 scripts/eol/             flash and verify scripts the station runs
 deploy/terraform/        modules: core, lambda, ec2; environments/example

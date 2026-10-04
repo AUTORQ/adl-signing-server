@@ -2,13 +2,13 @@
 
 ## What we're protecting, in order
 
-1. **The intermediate CA keys.** Whoever can sign with them can mint a
+1. The intermediate CA keys. Whoever can sign with them can mint a
    device the cloud will trust.
-2. **Production device private keys.** Each one is a working device
+2. Production device private keys. Each one is a working device
    identity.
-3. **The registry and archive.** These record which identities exist, and
+3. The registry and archive. These record which identities exist, and
    they're the only way to recover dev keys.
-4. **Escrowed dev keys.** Lower value, but still device identities in the
+4. Escrowed dev keys. Lower value, but still device identities in the
    dev environment.
 
 ## Controls
@@ -45,9 +45,9 @@
 - Dev keys are generated on the developer's machine and, by default,
   escrowed.
 
-### Escrow (the deliberate trade-off)
+### Escrow of dev keys
 
-Storing private keys centrally isn't best practice. We do it for **dev only**
+Storing private keys centrally isn't best practice. We do it for dev only
 because developers kept losing them, and a lost dev key costs more time than
 it's worth protecting. Mitigations:
 
@@ -84,28 +84,28 @@ group only allows the ALB.
 
 ## Things this repo doesn't do (but you should)
 
-- **Alarms.** Add CloudWatch alarms or EventBridge rules for: assumption of
+- Alarms. Add CloudWatch alarms or EventBridge rules for: assumption of
   a break-glass role; any `kms:Sign` on the CA keys by a principal other
   than the service role (it should be impossible, so alert if it happens);
   `ca.install` and `key.retrieve` audit events; and 4xx/5xx spikes.
-- **SCPs** in the AWS org preventing `kms:ScheduleKeyDeletion` on the CA
+- SCPs in the AWS org preventing `kms:ScheduleKeyDeletion` on the CA
   keys and `s3:BypassGovernanceRetention`, except from a break-glass role.
-- **Separate account.** Run this in its own AWS account with very few
+- Separate account. Run this in its own AWS account with very few
   admins. It's the most sensitive thing in the device stack. By default the
   KMS key admins are "the account" (so Terraform can manage the keys),
   which means any account admin could rewrite a CA key policy. Either
   accept that in a dedicated account, or set `kms_admin_principal_arns`
   to the Terraform deploy role only.
-- **Trustworthy names in the audit log.** The actor is `role/session`.
+- Trustworthy names in the audit log. The actor is `role/session`.
   With IAM Identity Center the session name is set by AWS. With the
   optional `adl-*` roles the caller picks their own session name, so either
   stick to Identity Center or add an `sts:RoleSessionName` /
   `sts:SourceIdentity` condition to those trust policies that fits how
   AutorQ's people sign in. The full ARN, including the source principal, is
   in CloudTrail either way.
-- **Station hardening.** Use full-disk encryption, a dedicated OS user, and
+- Station hardening. Use full-disk encryption, a dedicated OS user, and
   IAM Roles Anywhere with the station key in a TPM.
-- **Firmware.** Secure Boot v2 and flash encryption at end of line (see
+- Firmware. Secure Boot v2 and flash encryption at end of line (see
   eol-provisioning.md).
 
 ## Break glass
@@ -116,4 +116,4 @@ role listed in `break_glass_role_arns` can read
 That bypasses the app's audit log but still shows up in CloudTrail (S3 data
 events, if enabled, plus the KMS Decrypt). Alarm on it.
 
-There is no break-glass path for the CA keys. That's by design.
+There is no break-glass path for the CA keys, and there shouldn't be one.

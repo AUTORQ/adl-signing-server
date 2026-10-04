@@ -18,21 +18,21 @@ switching modes is a Terraform variable rather than a migration.
 
 ```
 adl                                   adl-signer                          AWS
- │ generate key + CSR locally
- │ sign sts:GetCallerIdentity  ──────►  verify token shape, audience,
- │ (audience, nonce, body hash)         request digest, timestamp
- │                                      replay to STS ─────────────────►  STS: who is this?
- │                                      claim nonce (DynamoDB, TTL)
- │                                      role → permissions (auth policy)
- │                                      validate CSR, chip, labels
- │                                      allocate DVTADL id (atomic ADD) ►  DynamoDB
- │                                      sign cert ──────────────────────►  KMS Sign (digest)
- │                                      verify signature locally
- │                                      archive cert/chain(/key) ───────►  S3 (SSE-KMS)
- │                                      record cert, update device ─────►  DynamoDB
- │                                      audit event ────────────────────►  DynamoDB + logs
- │ ◄──────────────────────────────────  cert + chain
- │ write files / flash device
+ | generate key + CSR locally
+ | sign sts:GetCallerIdentity  ------>  verify token shape, audience,
+ | (audience, nonce, body hash)         request digest, timestamp
+ |                                      replay to STS ----------------->  STS: who is this?
+ |                                      claim nonce (DynamoDB, TTL)
+ |                                      role -> permissions (auth policy)
+ |                                      validate CSR, chip, labels
+ |                                      allocate DVTADL id (atomic ADD) >  DynamoDB
+ |                                      sign cert ---------------------->  KMS Sign (digest)
+ |                                      verify signature locally
+ |                                      archive cert/chain(/key) ------->  S3 (SSE-KMS)
+ |                                      record cert, update device ----->  DynamoDB
+ |                                      audit event -------------------->  DynamoDB + logs
+ | <----------------------------------  cert + chain
+ | write files / flash device
 ```
 
 ## Authentication
@@ -71,9 +71,9 @@ request (digest), a second time (nonce), or after five minutes (timestamp).
 Recommended: bind IAM Identity Center permission sets with `auth_bindings`.
 AWS sets the role session name to the person's username, so the audit log
 shows who really did it. Optionally (`create_client_roles = true`) Terraform
-also creates `adl-developer` → `dev:issue dev:read dev:key-read`,
-`adl-factory-station` → `prod:issue prod:read prod:provision` and
-`adl-ca-admin` → `*`. Those roles are assumable only by the principals you
+also creates `adl-developer` -> `dev:issue dev:read dev:key-read`,
+`adl-factory-station` -> `prod:issue prod:read prod:provision` and
+`adl-ca-admin` -> `*`. Those roles are assumable only by the principals you
 list (and, for the station role, by IAM Roles Anywhere trust anchors).
 
 ## Device identity rules
@@ -97,7 +97,7 @@ Both run the identical handler. Pick per deployment:
 
 | | Lambda + API Gateway | EC2 + ALB |
 |---|---|---|
-| cost at this volume | cents/month | ALB + 2× t4g.small, roughly $40-50/month |
+| cost at this volume | cents/month | ALB + 2x t4g.small, roughly $40-50/month |
 | patching | none | AMI refresh (instance refresh is wired up) |
 | cold start | ~300-500 ms on first call | none |
 | private-only access | possible via private API, not wired here | `internal_alb = true` behind VPN/Direct Connect |

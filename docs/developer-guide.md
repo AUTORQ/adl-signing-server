@@ -35,7 +35,7 @@ The config lives in `~/.config/adl/config.json`. `ADL_URL`, `ADL_REGION`,
 adl mint
 ```
 
-That's it. You get the next free device ID and these files:
+You get the next free device ID and these files:
 
 ```
 certs/DVTADL017/device/device-DVTADL017.crt         the device certificate

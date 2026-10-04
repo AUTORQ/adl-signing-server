@@ -135,8 +135,8 @@ func (i *Issuer) IssueDevice(deviceID string, pub crypto.PublicKey, p DeviceProf
 	if err != nil {
 		return nil, fmt.Errorf("parse issued certificate: %w", err)
 	}
-	// Belt and braces: make sure what came back from the signer (KMS)
-	// actually verifies before anyone flashes it.
+	// Check what came back from the signer (KMS) actually verifies
+	// before anyone flashes it.
 	if err := cert.CheckSignatureFrom(i.cert); err != nil {
 		return nil, fmt.Errorf("issued certificate does not verify against issuer: %w", err)
 	}

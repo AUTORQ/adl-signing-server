@@ -246,8 +246,8 @@ var (
 // returns the signed header names and a canonical rebuild of the header,
 // which is what we forward to STS. Rebuilding (rather than passing the
 // caller's string through) means STS verifies exactly the fields we
-// checked, with no room for duplicate or extra fields to be read
-// differently on the two sides.
+// checked, and a duplicate or extra field can't be read one way by us
+// and another way by STS.
 func checkAuthorization(authz, region string) ([]string, string, error) {
 	rest, ok := strings.CutPrefix(authz, "AWS4-HMAC-SHA256 ")
 	if !ok {

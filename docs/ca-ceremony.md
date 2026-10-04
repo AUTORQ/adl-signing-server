@@ -4,10 +4,10 @@
 
 ```
 AutorQ Root CA            offline, held by AutorQ, never touches this system
-  ├── EDGE Labs Intermediate CA dev    private key = KMS key alias/adl-signer-ca-dev
-  │     └── DVTADL… dev device certs
-  └── EDGE Labs Intermediate CA prod   private key = KMS key alias/adl-signer-ca-prod
-        └── DVTADL… prod device certs
+  |-- EDGE Labs Intermediate CA dev    private key = KMS key alias/adl-signer-ca-dev
+  |     `-- DVTADL### dev device certs
+  `-- EDGE Labs Intermediate CA prod   private key = KMS key alias/adl-signer-ca-prod
+        `-- DVTADL### prod device certs
 ```
 
 Each environment's intermediate private key is created inside KMS by
@@ -22,7 +22,7 @@ root, use it for the prod ceremony below. Nothing else changes.
 
 You need `ca:admin` (the `adl-ca-admin` role, or a binding with `*`).
 
-**1. Get a CSR out of KMS**
+### 1. Get a CSR out of KMS
 
 ```sh
 adl ca csr --env prod --cn "EDGE Labs Intermediate CA prod" \
@@ -30,8 +30,10 @@ adl ca csr --env prod --cn "EDGE Labs Intermediate CA prod" \
            --out prod-intermediate.csr
 ```
 
-**2. The root holder signs it** on the offline machine that holds the root
-key. Use an extension file so the result is a proper pathlen-0 intermediate:
+### 2. The root holder signs it
+
+Do this on the offline machine that holds the root key. Use an extension
+file so the result is a proper pathlen-0 intermediate:
 
 ```sh
 cat > intermediate.ext <<'EOF'
@@ -52,7 +54,7 @@ cat prod-intermediate.pem autorq-root.pem > prod-chain.pem
 20 years (`-days 7300`) matches the droplet intermediates. Device certs are
 clamped so they never outlive their intermediate.
 
-**3. Install it**
+### 3. Install it
 
 ```sh
 adl ca install --env prod --chain prod-chain.pem
@@ -68,7 +70,7 @@ at `s3://<archive>/ca/prod/chain.pem`, with a copy under
 Do the same for `dev`. Until an environment's CA is installed, issuing for it
 fails with `ca_not_configured`.
 
-**4. Publish the trust info**
+### 4. Publish the trust info
 
 - The cloud side (whatever authenticates devices, e.g. AWS IoT Core CA
   registration or an mTLS trust store) needs the new intermediates, or
@@ -98,11 +100,11 @@ and every device key it ever generated, sitting as plain files under `/root`
 on an internet-facing host. **Treat both droplet intermediates as possibly
 compromised.** The plan:
 
-**1. Stand this system up and run the ceremony for dev and prod** (above),
+Step 1: stand this system up and run the ceremony for dev and prod (above),
 with new KMS-backed intermediates. From then on, all new certs come from
 here.
 
-**2. Import the existing devices** so they show up in the registry and the
+Step 2: import the existing devices so they show up in the registry and the
 counter carries on from DVTADL016. Copy the directories off the droplet over
 SSH to an admin machine first, never via a third party:
 
@@ -125,7 +127,7 @@ first. Those six are then skipped as already registered (same serials)
 instead of showing up as prod devices. Check `adl show` on a couple of
 them afterwards.
 
-**3. Decide what to do with the legacy intermediates (with AutorQ).**
+Step 3: decide with AutorQ what to do with the legacy intermediates.
 Options, strongest first:
 
 - Have the root holder revoke both droplet intermediates on the root's CRL,
@@ -138,7 +140,7 @@ Options, strongest first:
   intermediate for those serials only, and plan the re-key into the next
   firmware update.
 
-**4. Destroy the droplet's key material** once the copies are verified:
+Step 4: destroy the droplet's key material once the copies are verified:
 shred the `prod-keys/` and `dev-keys/` trees and the zips, then destroy
 the droplet (and its snapshots/backups in DigitalOcean). Remove the root
 SSH key it accepted from anywhere else it is trusted.
@@ -147,7 +149,7 @@ SSH key it accepted from anywhere else it is trusted.
 
 ```sh
 adl revoke DVTADL023 --reason keyCompromise          # all active certs on the device
-adl revoke DVTADL023 --reason superseded --serial 5E75…
+adl revoke DVTADL023 --reason superseded --serial 5E757B55...
 ```
 
 Reasons: `keyCompromise`, `superseded`, `cessationOfOperation`,

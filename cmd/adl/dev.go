@@ -58,8 +58,8 @@ func cmdWhoami(ctx context.Context, _ []string) error {
 	return nil
 }
 
-// cmdMint is the developer happy path: one command, cert on disk, key
-// backed up on the server.
+// cmdMint is what most developers will ever run: one command, cert on
+// disk, key backed up on the server.
 func cmdMint(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("mint", flag.ExitOnError)
 	env := fs.String("env", "dev", "environment")
