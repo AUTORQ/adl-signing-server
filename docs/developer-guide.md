@@ -78,8 +78,8 @@ adl show DVTADL017       # status, labels, every cert it has had
 
 ## Things to know
 
-- Dev certificates do **not** chain to the prod intermediate, and the
-  server will never put a dev key on a prod device or the other way round.
+- Dev certificates chain to the dev intermediate, not the prod one, so the
+  cloud side can (and should) refuse dev identities in production.
 - Escrow is a convenience for dev hardware only. Prod keys are never sent
   to the server.
 - Don't commit the `certs/` directory into your firmware repo. Add it to
