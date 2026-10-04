@@ -82,7 +82,7 @@ func New(o Options) (*Service, error) {
 	}
 	envs := map[string]EnvConfig{}
 	for _, e := range o.Envs {
-		if !envNameRE.MatchString(e.Name) {
+		if !envNameRE.MatchString(e.Name) || slices.Contains(auth.ReservedNames, e.Name) {
 			return nil, fmt.Errorf("service: bad environment name %q", e.Name)
 		}
 		if e.DevicePrefix == "" || e.Validity <= 0 {
@@ -368,12 +368,15 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 		return nil, mapStoreErr(err)
 	}
 	if replaced != "" {
+		var revokedNow []*model.Certificate
 		if old, err := s.store.GetCertificate(ctx, replaced); err == nil && old.Status == model.CertActive {
 			if err := s.revokeRecord(ctx, p, old, "superseded", now); err != nil {
 				s.log.ErrorContext(ctx, "could not revoke superseded certificate", "serial", replaced, "err", err)
+			} else {
+				revokedNow = append(revokedNow, old)
 			}
 		}
-		s.refreshCRLBestEffort(ctx, env)
+		s.refreshCRLBestEffort(ctx, env, revokedNow...)
 	}
 
 	s.audit(ctx, p, "certificate.issue", env.Name, dev.ID, serial, map[string]string{
@@ -586,7 +589,7 @@ func (s *Service) Revoke(ctx context.Context, p *auth.Principal, id string, req 
 		return nil, err
 	}
 	now := s.now().UTC()
-	n := 0
+	var revokedNow []*model.Certificate
 	for _, c := range certs {
 		if c.Status != model.CertActive || (req.Serial != "" && c.Serial != req.Serial) {
 			continue
@@ -594,9 +597,9 @@ func (s *Service) Revoke(ctx context.Context, p *auth.Principal, id string, req 
 		if err := s.revokeRecord(ctx, p, c, req.Reason, now); err != nil {
 			return nil, err
 		}
-		n++
+		revokedNow = append(revokedNow, c)
 	}
-	if n == 0 {
+	if len(revokedNow) == 0 {
 		return nil, notFound("no active certificate to revoke on %s", id)
 	}
 	if req.Serial == "" || req.Serial == dev.CurrentSerial {
@@ -607,7 +610,7 @@ func (s *Service) Revoke(ctx context.Context, p *auth.Principal, id string, req 
 		}
 	}
 	env, _ := s.env(dev.Env)
-	s.refreshCRLBestEffort(ctx, env)
+	s.refreshCRLBestEffort(ctx, env, revokedNow...)
 	return s.GetDevice(ctx, p, id)
 }
 
@@ -647,15 +650,33 @@ func (s *Service) CRL(ctx context.Context, envName string) ([]byte, error) {
 	return s.refreshCRL(ctx, env)
 }
 
-func (s *Service) refreshCRL(ctx context.Context, env EnvConfig) ([]byte, error) {
+// refreshCRL re-signs the env's CRL. justRevoked are records revoked in
+// this request: the revoked index is eventually consistent and may not
+// show them yet, and a CRL missing a fresh keyCompromise would be served
+// for days.
+func (s *Service) refreshCRL(ctx context.Context, env EnvConfig, justRevoked ...*model.Certificate) ([]byte, error) {
 	iss, err := s.issuer(ctx, env.Name)
 	if err != nil {
 		return nil, err
 	}
-	revoked, err := s.store.ListRevoked(ctx, env.Name)
+	listed, err := s.store.ListRevoked(ctx, env.Name)
 	if err != nil {
 		return nil, err
 	}
+	bySerial := map[string]*model.Certificate{}
+	for _, c := range listed {
+		bySerial[c.Serial] = c
+	}
+	for _, c := range justRevoked {
+		if c.Env == env.Name && c.Status == model.CertRevoked {
+			bySerial[c.Serial] = c
+		}
+	}
+	revoked := make([]*model.Certificate, 0, len(bySerial))
+	for _, c := range bySerial {
+		revoked = append(revoked, c)
+	}
+	slices.SortFunc(revoked, func(a, b *model.Certificate) int { return strings.Compare(a.Serial, b.Serial) })
 	ski := hex.EncodeToString(iss.Certificate().SubjectKeyId)
 	var entries []pki.RevokedEntry
 	for _, c := range revoked {
@@ -685,8 +706,8 @@ func (s *Service) refreshCRL(ctx context.Context, env EnvConfig) ([]byte, error)
 	return der, nil
 }
 
-func (s *Service) refreshCRLBestEffort(ctx context.Context, env EnvConfig) {
-	if _, err := s.refreshCRL(ctx, env); err != nil {
+func (s *Service) refreshCRLBestEffort(ctx context.Context, env EnvConfig, justRevoked ...*model.Certificate) {
+	if _, err := s.refreshCRL(ctx, env, justRevoked...); err != nil {
 		s.log.ErrorContext(ctx, "crl refresh failed", "env", env.Name, "err", err)
 	}
 }
@@ -869,18 +890,6 @@ func (s *Service) Import(ctx context.Context, p *auth.Principal, req model.Impor
 			return nil, err
 		}
 	}
-	rec := &model.Certificate{
-		Serial: serial, DeviceID: id, Env: env.Name, Status: model.CertActive,
-		Subject: leaf.Subject.String(), Issuer: leaf.Issuer.String(),
-		FingerprintSHA256: pki.Fingerprint(leaf), AuthorityKeyID: hex.EncodeToString(leaf.AuthorityKeyId),
-		KeyAlgorithm: pki.KeyAlgorithm(leaf.PublicKey), NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter,
-		IssuedAt: leaf.NotBefore.UTC(), IssuedBy: "legacy", KeyEscrowed: keyPEM != nil, Imported: true,
-		ArchivePrefix: archive.CertificatePrefix(env.Name, id, serial),
-	}
-	if err := s.store.PutCertificate(ctx, rec); err != nil {
-		return nil, mapStoreErr(err)
-	}
-
 	// The newest certificate wins as "current".
 	makeCurrent := dev.CurrentSerial == ""
 	if !makeCurrent {
@@ -908,6 +917,21 @@ func (s *Service) Import(ctx context.Context, p *auth.Principal, req model.Impor
 	if err != nil {
 		return nil, mapStoreErr(err)
 	}
+	rec := &model.Certificate{
+		Serial: serial, DeviceID: id, Env: env.Name, Status: model.CertActive,
+		Subject: leaf.Subject.String(), Issuer: leaf.Issuer.String(),
+		FingerprintSHA256: pki.Fingerprint(leaf), AuthorityKeyID: hex.EncodeToString(leaf.AuthorityKeyId),
+		KeyAlgorithm: pki.KeyAlgorithm(leaf.PublicKey), NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter,
+		IssuedAt: leaf.NotBefore.UTC(), IssuedBy: "legacy", KeyEscrowed: keyPEM != nil, Imported: true,
+		ArchivePrefix: archive.CertificatePrefix(env.Name, id, serial),
+	}
+	// Device first, then the cert record: the "already_imported" check
+	// keys off the cert record, so if the device write fails a retry still
+	// gets this far instead of being stuck behind an orphan cert.
+	if err := s.store.PutCertificate(ctx, rec); err != nil {
+		return nil, mapStoreErr(err)
+	}
+
 	if n, ok := sequenceNumber(env.DevicePrefix, id); ok {
 		if err := s.store.EnsureSequenceAtLeast(ctx, seqName(env.DevicePrefix), n); err != nil {
 			return nil, err

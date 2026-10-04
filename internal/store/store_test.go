@@ -152,12 +152,13 @@ func conformance(t *testing.T, s store.Store) {
 		if err := s.UpdateDevice(ctx, &stale); !errors.Is(err, store.ErrConflict) {
 			t.Errorf("stale update should conflict, got %v", err)
 		}
-		id, err := s.DeviceIDForChip(ctx, "aabbcc")
+		id, err := s.DeviceIDForChip(ctx, "dev", "aabbcc")
 		if err != nil || id != "DEV1" {
 			t.Errorf("chip lookup: %q %v", id, err)
 		}
 
-		if err := s.CreateDevice(ctx, &model.Device{ID: "PROD1", Env: "prod", CreatedAt: now}); err != nil {
+		// Claims are per environment: the same chip in prod is a separate claim.
+		if err := s.CreateDevice(ctx, &model.Device{ID: "PROD1", Env: "prod", ChipID: "aabbcc", CreatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 		list, err := s.ListDevices(ctx, "dev")

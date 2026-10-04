@@ -116,6 +116,10 @@ type Binding struct {
 	Permissions []string `json:"permissions"`
 }
 
+// ReservedNames are permission namespaces that can't be environment names,
+// otherwise "ca:*" would read as an env wildcard and grant ca:admin.
+var ReservedNames = []string{"ca", "admin", "audit"}
+
 var (
 	envActionRE = regexp.MustCompile(`^[a-z][a-z0-9-]*:(\*|issue|read|key-read|provision|revoke)$`)
 	globalPerms = []string{"*", "ca:admin", "audit:read", "admin:import"}
@@ -141,7 +145,11 @@ func (p *Policy) Validate() error {
 			}
 		}
 		for _, perm := range b.Permissions {
-			if !slices.Contains(globalPerms, perm) && !envActionRE.MatchString(perm) {
+			if slices.Contains(globalPerms, perm) {
+				continue
+			}
+			env, _, _ := strings.Cut(perm, ":")
+			if !envActionRE.MatchString(perm) || slices.Contains(ReservedNames, env) {
 				return fmt.Errorf("auth policy: unknown permission %q", perm)
 			}
 		}

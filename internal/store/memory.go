@@ -46,11 +46,13 @@ func (m *Memory) EnsureSequenceAtLeast(_ context.Context, name string, n int64) 
 	return nil
 }
 
-func (m *Memory) claimLocked(chip, id string) error {
+func chipKey(env, chip string) string { return env + "/" + chip }
+
+func (m *Memory) claimLocked(env, chip, id string) error {
 	if chip == "" {
 		return nil
 	}
-	if owner, ok := m.chips[chip]; ok && owner != id {
+	if owner, ok := m.chips[chipKey(env, chip)]; ok && owner != id {
 		return &ChipClaimedError{ChipID: chip, DeviceID: owner}
 	}
 	return nil
@@ -62,13 +64,13 @@ func (m *Memory) CreateDevice(_ context.Context, d *model.Device) error {
 	if _, ok := m.devices[d.ID]; ok {
 		return ErrConflict
 	}
-	if err := m.claimLocked(d.ChipID, d.ID); err != nil {
+	if err := m.claimLocked(d.Env, d.ChipID, d.ID); err != nil {
 		return err
 	}
 	d.Version = 1
 	m.devices[d.ID] = cloneDevice(*d)
 	if d.ChipID != "" {
-		m.chips[d.ChipID] = d.ID
+		m.chips[chipKey(d.Env, d.ChipID)] = d.ID
 	}
 	return nil
 }
@@ -94,13 +96,13 @@ func (m *Memory) UpdateDevice(_ context.Context, d *model.Device) error {
 	if cur.Version != d.Version {
 		return ErrConflict
 	}
-	if err := m.claimLocked(d.ChipID, d.ID); err != nil {
+	if err := m.claimLocked(d.Env, d.ChipID, d.ID); err != nil {
 		return err
 	}
 	d.Version++
 	m.devices[d.ID] = cloneDevice(*d)
 	if d.ChipID != "" {
-		m.chips[d.ChipID] = d.ID
+		m.chips[chipKey(d.Env, d.ChipID)] = d.ID
 	}
 	return nil
 }
@@ -119,10 +121,10 @@ func (m *Memory) ListDevices(_ context.Context, env string) ([]*model.Device, er
 	return out, nil
 }
 
-func (m *Memory) DeviceIDForChip(_ context.Context, chipID string) (string, error) {
+func (m *Memory) DeviceIDForChip(_ context.Context, env, chipID string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	id, ok := m.chips[chipID]
+	id, ok := m.chips[chipKey(env, chipID)]
 	if !ok {
 		return "", ErrNotFound
 	}

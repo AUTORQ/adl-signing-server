@@ -19,7 +19,7 @@ import (
 //
 //	device        pk=DEVICE#<id>   sk=DEVICE        gsi1=ENV#<env> / <id>
 //	certificate   pk=DEVICE#<id>   sk=CERT#<serial> gsi2=SERIAL#<serial>; gsi1=REVOKED#<env> once revoked
-//	chip claim    pk=CHIP#<chip>   sk=CHIP
+//	chip claim    pk=CHIP#<env>#<chip>  sk=CHIP
 //	sequence      pk=SEQ#<name>    sk=SEQ
 //	audit         pk=AUDIT#<day>   sk=<time>#<id>
 const (
@@ -61,8 +61,8 @@ func key(pk, sk string) map[string]types.AttributeValue {
 	return map[string]types.AttributeValue{attrPK: s(pk), attrSK: s(sk)}
 }
 
-func devicePK(id string) string { return "DEVICE#" + id }
-func chipPK(chip string) string { return "CHIP#" + chip }
+func devicePK(id string) string      { return "DEVICE#" + id }
+func chipPK(env, chip string) string { return "CHIP#" + env + "#" + chip }
 
 func (d *Dynamo) NextSequence(ctx context.Context, name string) (int64, error) {
 	out, err := d.api.UpdateItem(ctx, &dynamodb.UpdateItemInput{
@@ -115,7 +115,7 @@ func (d *Dynamo) chipClaim(dev *model.Device) types.TransactWriteItem {
 	return types.TransactWriteItem{Put: &types.Put{
 		TableName: aws.String(d.table),
 		Item: map[string]types.AttributeValue{
-			attrPK: s(chipPK(dev.ChipID)), attrSK: s("CHIP"),
+			attrPK: s(chipPK(dev.Env, dev.ChipID)), attrSK: s("CHIP"),
 			"device_id": s(dev.ID), attrType: s("chip"),
 		},
 		ConditionExpression:       aws.String("attribute_not_exists(pk) OR device_id = :id"),
@@ -138,7 +138,7 @@ func (d *Dynamo) CreateDevice(ctx context.Context, dev *model.Device) error {
 	if dev.ChipID != "" {
 		tx = append(tx, d.chipClaim(dev))
 	}
-	if err := d.transact(ctx, tx, dev.ChipID); err != nil {
+	if err := d.transact(ctx, tx, dev.Env, dev.ChipID); err != nil {
 		return err
 	}
 	dev.Version = 1
@@ -161,7 +161,7 @@ func (d *Dynamo) UpdateDevice(ctx context.Context, dev *model.Device) error {
 	if dev.ChipID != "" {
 		tx = append(tx, d.chipClaim(dev))
 	}
-	if err := d.transact(ctx, tx, dev.ChipID); err != nil {
+	if err := d.transact(ctx, tx, dev.Env, dev.ChipID); err != nil {
 		return err
 	}
 	dev.Version = next.Version
@@ -170,7 +170,7 @@ func (d *Dynamo) UpdateDevice(ctx context.Context, dev *model.Device) error {
 
 // transact runs a device write plus optional chip claim and turns
 // cancellation reasons into ErrConflict / ChipClaimedError.
-func (d *Dynamo) transact(ctx context.Context, tx []types.TransactWriteItem, chip string) error {
+func (d *Dynamo) transact(ctx context.Context, tx []types.TransactWriteItem, env, chip string) error {
 	_, err := d.api.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: tx})
 	if err == nil {
 		return nil
@@ -182,7 +182,7 @@ func (d *Dynamo) transact(ctx context.Context, tx []types.TransactWriteItem, chi
 				continue
 			}
 			if i == 1 && chip != "" {
-				owner, lerr := d.DeviceIDForChip(ctx, chip)
+				owner, lerr := d.DeviceIDForChip(ctx, env, chip)
 				if lerr != nil {
 					owner = "unknown"
 				}
@@ -239,10 +239,10 @@ func (d *Dynamo) ListDevices(ctx context.Context, env string) ([]*model.Device, 
 	return out, nil
 }
 
-func (d *Dynamo) DeviceIDForChip(ctx context.Context, chipID string) (string, error) {
+func (d *Dynamo) DeviceIDForChip(ctx context.Context, env, chipID string) (string, error) {
 	out, err := d.api.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName:      aws.String(d.table),
-		Key:            key(chipPK(chipID), "CHIP"),
+		Key:            key(chipPK(env, chipID), "CHIP"),
 		ConsistentRead: aws.Bool(true),
 	})
 	if err != nil {

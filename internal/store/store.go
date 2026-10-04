@@ -44,7 +44,9 @@ type Store interface {
 	// bumps d.Version. Claims the chip ID if set.
 	UpdateDevice(ctx context.Context, d *model.Device) error
 	ListDevices(ctx context.Context, env string) ([]*model.Device, error)
-	DeviceIDForChip(ctx context.Context, chipID string) (string, error)
+	// DeviceIDForChip looks up the claim on chipID within env. Claims are
+	// per environment so a dev cert can never squat on a production chip.
+	DeviceIDForChip(ctx context.Context, env, chipID string) (string, error)
 
 	PutCertificate(ctx context.Context, c *model.Certificate) error
 	UpdateCertificate(ctx context.Context, c *model.Certificate) error

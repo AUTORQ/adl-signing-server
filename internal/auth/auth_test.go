@@ -2,6 +2,8 @@ package auth_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -189,4 +191,48 @@ func TestRealSTS(t *testing.T) {
 		t.Fatalf("expected STS to accept the token and policy to refuse it, got %v", err)
 	}
 	t.Log(err)
+}
+
+func TestDuplicateAuthorizationFieldsRejected(t *testing.T) {
+	signer, verifier := setup(t, testARN)
+	tok, err := signer.Token(context.Background(), "GET", "/v1/whoami", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := base64.RawURLEncoding.DecodeString(tok)
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	hdrs := m["headers"].(map[string]any)
+	hdrs["Authorization"] = hdrs["Authorization"].(string) + ", SignedHeaders=host;x-amz-date"
+	raw, _ = json.Marshal(m)
+	r := httptest.NewRequest("GET", "/v1/whoami", nil)
+	r.Header.Set(auth.HeaderAuth, base64.RawURLEncoding.EncodeToString(raw))
+	if _, err := verifier.Authenticate(context.Background(), r, nil); !errors.Is(err, auth.ErrUnauthenticated) {
+		t.Errorf("duplicate SignedHeaders accepted: %v", err)
+	}
+}
+
+type brokenNonces struct{}
+
+func (brokenNonces) ClaimNonce(context.Context, string, time.Time) error {
+	return errors.New("ProvisionedThroughputExceededException")
+}
+
+func TestNonceStorageErrorIsNotReplay(t *testing.T) {
+	signer, verifier := setup(t, testARN)
+	verifier.Nonces = brokenNonces{}
+	r := request(t, signer, "GET", "/v1/whoami", "")
+	_, err := verifier.Authenticate(context.Background(), r, nil)
+	if err == nil || errors.Is(err, auth.ErrUnauthenticated) {
+		t.Errorf("storage failure should be a server error, got %v", err)
+	}
+}
+
+func TestReservedNamespacesNotEnvWildcards(t *testing.T) {
+	for _, perm := range []string{"ca:*", "admin:*", "audit:*", "ca:issue"} {
+		p := &auth.Policy{Accounts: []string{"111111111111"}, Bindings: []auth.Binding{{Roles: []string{"r"}, Permissions: []string{perm}}}}
+		if err := p.Validate(); err == nil {
+			t.Errorf("%s should be rejected", perm)
+		}
+	}
 }

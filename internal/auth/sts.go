@@ -13,12 +13,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+
+	"github.com/edge-labs/adl-signing-server/internal/store"
 )
 
 const (
@@ -173,10 +176,11 @@ func (v *STSVerifier) Authenticate(ctx context.Context, r *http.Request, body []
 		hdr.Set(k, val)
 	}
 
-	signed, err := checkAuthorization(hdr.Get("Authorization"), tok.Region)
+	signed, canonicalAuthz, err := checkAuthorization(hdr.Get("Authorization"), tok.Region)
 	if err != nil {
 		return nil, v.fail("%v", err)
 	}
+	hdr.Set("Authorization", canonicalAuthz)
 	for _, need := range []string{"host", "x-amz-date", strings.ToLower(headerAudience), strings.ToLower(headerDigest), strings.ToLower(headerNonce)} {
 		if !slices.Contains(signed, need) {
 			return nil, v.fail("signature does not cover %s", need)
@@ -213,7 +217,10 @@ func (v *STSVerifier) Authenticate(ctx context.Context, r *http.Request, body []
 	// anyone could pre-claim nonces with garbage tokens.
 	if v.Nonces != nil {
 		if err := v.Nonces.ClaimNonce(ctx, nonce, ts.Add(2*skew)); err != nil {
-			return nil, v.fail("token already used")
+			if errors.Is(err, store.ErrConflict) {
+				return nil, v.fail("token already used")
+			}
+			return nil, fmt.Errorf("record auth nonce: %w", err)
 		}
 	}
 
@@ -230,30 +237,51 @@ func (v *STSVerifier) Authenticate(ctx context.Context, r *http.Request, body []
 	return p, nil
 }
 
-// checkAuthorization parses a SigV4 Authorization header and returns the
-// signed header names after checking the credential scope.
-func checkAuthorization(authz, region string) ([]string, error) {
+var (
+	signedHeadersRE = regexp.MustCompile(`^[a-z0-9-]+(;[a-z0-9-]+)*$`)
+	signatureRE     = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
+// checkAuthorization strictly parses a SigV4 Authorization header. It
+// returns the signed header names and a canonical rebuild of the header,
+// which is what we forward to STS. Rebuilding (rather than passing the
+// caller's string through) means STS verifies exactly the fields we
+// checked, with no room for duplicate or extra fields to be read
+// differently on the two sides.
+func checkAuthorization(authz, region string) ([]string, string, error) {
 	rest, ok := strings.CutPrefix(authz, "AWS4-HMAC-SHA256 ")
 	if !ok {
-		return nil, errors.New("authorization is not AWS4-HMAC-SHA256")
+		return nil, "", errors.New("authorization is not AWS4-HMAC-SHA256")
 	}
-	var cred, signed string
+	fields := map[string]string{}
 	for _, part := range strings.Split(rest, ",") {
-		part = strings.TrimSpace(part)
-		if v, ok := strings.CutPrefix(part, "Credential="); ok {
-			cred = v
-		} else if v, ok := strings.CutPrefix(part, "SignedHeaders="); ok {
-			signed = v
+		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok {
+			return nil, "", errors.New("malformed authorization field")
 		}
+		switch k {
+		case "Credential", "SignedHeaders", "Signature":
+		default:
+			return nil, "", fmt.Errorf("unexpected authorization field %q", k)
+		}
+		if _, dup := fields[k]; dup {
+			return nil, "", fmt.Errorf("duplicate authorization field %q", k)
+		}
+		fields[k] = v
 	}
+	cred, signed, sig := fields["Credential"], fields["SignedHeaders"], fields["Signature"]
 	scope := strings.Split(cred, "/")
-	if len(scope) != 5 || scope[2] != region || scope[3] != "sts" || scope[4] != "aws4_request" {
-		return nil, errors.New("credential scope is not sts in the token region")
+	if len(scope) != 5 || scope[0] == "" || scope[2] != region || scope[3] != "sts" || scope[4] != "aws4_request" {
+		return nil, "", errors.New("credential scope is not sts in the token region")
 	}
-	if signed == "" {
-		return nil, errors.New("no signed headers")
+	if !signedHeadersRE.MatchString(signed) {
+		return nil, "", errors.New("bad signed headers list")
 	}
-	return strings.Split(signed, ";"), nil
+	if !signatureRE.MatchString(sig) {
+		return nil, "", errors.New("bad signature")
+	}
+	canonical := fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s, SignedHeaders=%s, Signature=%s", cred, signed, sig)
+	return strings.Split(signed, ";"), canonical, nil
 }
 
 type callerIdentity struct {

@@ -31,6 +31,7 @@ var (
 
 type harness struct {
 	svc     *service.Service
+	cas     *service.CAs
 	store   *store.Memory
 	archive *archive.Memory
 	roots   map[string]*x509.Certificate
@@ -52,6 +53,7 @@ func newHarness(t *testing.T, install bool) *harness {
 		return kmssigner.New(ctx, &kmssigner.Fake{Key: keys[env], ID: "key-" + env}, "key-"+env)
 	}
 	cas := service.NewCAs(factory, h.archive, nil)
+	h.cas = cas
 	svc, err := service.New(service.Options{
 		Store: h.store, Archive: h.archive, CAs: cas, Organization: "EDGE Labs",
 		Envs: []service.EnvConfig{
@@ -490,5 +492,78 @@ func TestCAInstallRejectsWrongKey(t *testing.T) {
 	_, err = h.svc.CAInstall(context.Background(), admin, "dev", model.CAInstallRequest{ChainPEM: string(pki.EncodeCertificates(other.Chain()...))})
 	if errCode(err) != "bad_request" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// staleRevoked hides revocations from ListRevoked, like a DynamoDB GSI that
+// hasn't caught up yet.
+type staleRevoked struct{ *store.Memory }
+
+func (staleRevoked) ListRevoked(context.Context, string) ([]*model.Certificate, error) {
+	return nil, nil
+}
+
+func TestCRLIncludesJustRevokedEvenWithStaleIndex(t *testing.T) {
+	h := newHarness(t, true)
+	ctx := context.Background()
+	_, csr := csrFor(t, "")
+	resp, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rebuild the service over a store whose revoked index lags.
+	svc, err := service.New(service.Options{
+		Store: staleRevoked{h.store}, Archive: h.archive, CAs: h.cas, Organization: "EDGE Labs",
+		Envs: []service.EnvConfig{{Name: "dev", DevicePrefix: "DVTADL", Validity: time.Hour, AllowKeyEscrow: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Revoke(ctx, admin, resp.Device.ID, model.RevokeRequest{Reason: "keyCompromise"}); err != nil {
+		t.Fatal(err)
+	}
+	der, err := svc.CRL(ctx, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	crl, _ := x509.ParseRevocationList(der)
+	if len(crl.RevokedCertificateEntries) != 1 || pki.SerialHex(crl.RevokedCertificateEntries[0].SerialNumber) != resp.Certificate.Serial {
+		t.Fatalf("fresh revocation missing from CRL: %+v", crl.RevokedCertificateEntries)
+	}
+}
+
+func TestDevCannotSquatOnProdChip(t *testing.T) {
+	h := newHarness(t, true)
+	ctx := context.Background()
+	_, a := csrFor(t, "")
+	_, b := csrFor(t, "")
+	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: a, ChipID: "f412fa00aaaa"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.Issue(ctx, station, model.IssueRequest{Env: "prod", CSR: b, ChipID: "f412fa00aaaa"}); err != nil {
+		t.Fatalf("a dev claim blocked prod provisioning: %v", err)
+	}
+}
+
+func TestImportRetryAfterFailedDeviceWrite(t *testing.T) {
+	h := newHarness(t, true)
+	ctx := context.Background()
+	legacy, _ := pkitest.NewHierarchy("Legacy", nil)
+	iss, _ := pki.NewIssuer(legacy.IntermediateKey, legacy.Chain(), time.Now())
+	key, _ := pki.GenerateKey("rsa2048")
+	cert, _ := iss.IssueDevice("DVTADL009", key.Public(), pki.DeviceProfile{Validity: time.Hour}, time.Now())
+
+	// Chip already belongs to another prod device, so the first attempt fails.
+	_, csr := csrFor(t, "")
+	if _, err := h.svc.Issue(ctx, station, model.IssueRequest{Env: "prod", CSR: csr, ChipID: "f412fa00bbbb"}); err != nil {
+		t.Fatal(err)
+	}
+	req := model.ImportRequest{Env: "prod", CertificatePEM: string(pki.EncodeCertificates(cert)), ChipID: "f412fa00bbbb"}
+	if _, err := h.svc.Import(ctx, admin, req); errCode(err) != "chip_already_assigned" {
+		t.Fatalf("expected chip conflict, got %v", err)
+	}
+	req.ChipID = ""
+	if _, err := h.svc.Import(ctx, admin, req); err != nil {
+		t.Fatalf("retry stuck after failed import: %v", err)
 	}
 }
