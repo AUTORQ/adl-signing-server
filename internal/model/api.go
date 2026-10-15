@@ -17,6 +17,11 @@ type IssueRequest struct {
 	// Replace re-issues a certificate for an existing device and revokes
 	// the previous one as superseded.
 	Replace bool `json:"replace,omitempty"`
+	// Move assigns a device that is in another stage of the same partner
+	// (dev -> prod or back) to Env. Its certificates there are revoked
+	// (cessationOfOperation) once the new one is issued, so a device is
+	// only ever live in one stage. Needs revoke on the old environment.
+	Move bool `json:"move,omitempty"`
 }
 
 type IssueResponse struct {
@@ -108,6 +113,16 @@ type WhoAmI struct {
 	Principal   string   `json:"principal"`
 	Account     string   `json:"account"`
 	Permissions []string `json:"permissions"`
+	// Environments are the ones the caller may use, with what for.
+	Environments []EnvAccess `json:"environments"`
+}
+
+// EnvAccess is one environment a caller may use.
+type EnvAccess struct {
+	Name    string   `json:"name"`
+	Partner string   `json:"partner,omitempty"`
+	Stage   string   `json:"stage"`
+	Actions []string `json:"actions"`
 }
 
 type AuditList struct {

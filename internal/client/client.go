@@ -33,6 +33,10 @@ type Config struct {
 	Profile string `json:"profile,omitempty"`
 	// Local talks to `adl-signer serve -local-insecure`.
 	Local bool `json:"local,omitempty"`
+	// Partner is the manufacturing partner to act for by default, for
+	// people who may act for several (AutorQ staff). Partner staff never
+	// need it: their identity only reaches their own environments.
+	Partner string `json:"partner,omitempty"`
 }
 
 // ConfigPath is where the CLI keeps its config.
@@ -63,7 +67,7 @@ func LoadConfig() (*Config, error) {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 	}
-	for env, dst := range map[string]*string{"ADL_URL": &c.URL, "ADL_REGION": &c.Region, "ADL_AUDIENCE": &c.Audience, "ADL_PROFILE": &c.Profile} {
+	for env, dst := range map[string]*string{"ADL_URL": &c.URL, "ADL_REGION": &c.Region, "ADL_AUDIENCE": &c.Audience, "ADL_PROFILE": &c.Profile, "ADL_PARTNER": &c.Partner} {
 		if v := os.Getenv(env); v != "" {
 			*dst = v
 		}

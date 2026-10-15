@@ -236,3 +236,43 @@ func TestReservedNamespacesNotEnvWildcards(t *testing.T) {
 		}
 	}
 }
+
+// One deployment for AutorQ and every manufacturing partner: the account a
+// caller comes from decides which partner they act for. A partner creating
+// a role named like an AutorQ admin's in their own account gets nothing
+// more than their own environments.
+func TestBindingsScopedToAccounts(t *testing.T) {
+	const autorq, edge, acme = "111111111111", "222222222222", "333333333333"
+	pol := &auth.Policy{
+		Accounts: []string{autorq, edge, acme},
+		Bindings: []auth.Binding{
+			{Accounts: []string{autorq}, Roles: []string{"AWSReservedSSO_AdministratorAccess_*"}, Permissions: []string{"*"}},
+			{Accounts: []string{edge}, Roles: []string{"*"}, Users: []string{"*"}, Permissions: []string{"edge-labs-dev:issue", "edge-labs-prod:issue"}},
+			{Accounts: []string{acme}, Roles: []string{"*"}, Users: []string{"*"}, Permissions: []string{"acme-dev:issue"}},
+		},
+	}
+	if err := pol.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for arn, want := range map[string]string{
+		"arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_AdministratorAccess_abc/thibault@autorq.com": "*",
+		"arn:aws:iam::222222222222:user/john":                                                "edge-labs-dev:issue edge-labs-prod:issue",
+		"arn:aws:sts::222222222222:assumed-role/AWSReservedSSO_AdministratorAccess_abc/eddy": "edge-labs-dev:issue edge-labs-prod:issue",
+		"arn:aws:iam::333333333333:user/tony":                                                "acme-dev:issue",
+		"arn:aws:iam::111111111111:user/someone":                                             "",
+	} {
+		p, err := auth.ParseARN(arn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = pol.Resolve(p)
+		if got := strings.Join(p.Permissions, " "); got != want || (want == "") != errors.Is(err, auth.ErrNotAuthorized) {
+			t.Errorf("%s: got %q (%v), want %q", arn, got, err, want)
+		}
+	}
+
+	pol.Bindings = append(pol.Bindings, auth.Binding{Accounts: []string{"444444444444"}, Roles: []string{"*"}, Permissions: []string{"acme-dev:read"}})
+	if err := pol.Validate(); err == nil {
+		t.Error("a binding for an account outside accounts must be refused")
+	}
+}

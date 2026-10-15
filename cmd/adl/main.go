@@ -18,21 +18,26 @@ import (
 	"github.com/edge-labs/adl-signing-server/internal/version"
 )
 
-const usage = `adl - EDGE Labs device certificate tool
+const usage = `adl - device certificate tool
+
+--env takes a stage (dev, prod) or a full environment name (edge-labs-dev).
+Your identity decides which partner's environments you reach; people who may
+act for several partners (AutorQ staff) pick one with --partner or set a
+default with "adl configure --partner".
 
 Setup:
-  adl configure --url URL --region REGION --audience AUD [--profile AWS_PROFILE]
+  adl configure --url URL --region REGION --audience AUD [--profile AWS_PROFILE] [--partner P]
   adl whoami
 
 Developers:
-  adl mint  [--id ID] [--label k=v] [--out DIR] [--zip] [--no-escrow] [--replace]
+  adl mint  [--env dev] (--mac MAC | --port PORT | --id ID) [--move] [--label k=v] [--out DIR] [--zip] [--no-escrow] [--replace]
   adl fetch ID [--out DIR] [--serial S] [--no-key]
-  adl list  [--env dev|prod]
+  adl list  [--env dev|prod] [--partner P]
   adl show  ID
 
 End of line (factory):
-  adl eol check     --station NAME [--port PORT]
-  adl eol provision --station NAME --port PORT [--firmware VER] [--reissue] [--loop]
+  adl eol check     [--env prod] --station NAME [--port PORT]
+  adl eol provision [--env prod] --station NAME --port PORT [--firmware VER] [--reissue] [--move] [--loop]
 
 Admin:
   adl revoke ID --reason REASON [--serial S]
@@ -43,6 +48,7 @@ Admin:
   adl import --env ENV --dir DIR [--with-keys] [--provisioned] [--dry-run]
   adl audit [--day YYYY-MM-DD]
 
+Commands that take --env also take --partner.
 Run "adl <command> -h" for the flags of a command.
 `
 
@@ -101,6 +107,25 @@ func run(ctx context.Context, args []string) error {
 		return cmdAudit(ctx, rest)
 	}
 	return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
+}
+
+// defaultPartner is the partner set with `adl configure --partner` (or
+// ADL_PARTNER), used when --partner is not given.
+func defaultPartner() string {
+	if cfg, err := client.LoadConfig(); err == nil {
+		return cfg.Partner
+	}
+	return ""
+}
+
+// resolveEnv maps --env (a stage or a full name) and --partner to the
+// environment the server knows, using what the caller may access.
+func resolveEnv(ctx context.Context, c *client.Client, partner, want string) (string, error) {
+	w, err := c.WhoAmI(ctx)
+	if err != nil {
+		return "", err
+	}
+	return client.ResolveEnv(w.Environments, partner, want)
 }
 
 func newClient(ctx context.Context) (*client.Client, error) {

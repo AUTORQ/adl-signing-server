@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/edge-labs/adl-signing-server/internal/client"
+	"github.com/edge-labs/adl-signing-server/internal/eol"
 	"github.com/edge-labs/adl-signing-server/internal/model"
 	"github.com/edge-labs/adl-signing-server/internal/pki"
 )
@@ -30,6 +31,7 @@ func cmdConfigure(args []string) error {
 	fs.StringVar(&cfg.Audience, "audience", cfg.Audience, "server audience string (from the Terraform outputs)")
 	fs.StringVar(&cfg.Profile, "profile", cfg.Profile, "AWS profile to use (e.g. your SSO profile)")
 	fs.BoolVar(&cfg.Local, "local", cfg.Local, "talk to a local `adl-signer serve -local-insecure`")
+	fs.StringVar(&cfg.Partner, "partner", cfg.Partner, "partner to act for by default, if you may act for several (\"\" to clear)")
 	_ = fs.Parse(args)
 	if cfg.URL == "" {
 		return errors.New("--url is required")
@@ -54,16 +56,31 @@ func cmdWhoami(ctx context.Context, _ []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("principal:   %s\narn:         %s\npermissions: %s\n", w.Principal, w.ARN, strings.Join(w.Permissions, " "))
-	return nil
+	fmt.Printf("principal:   %s\narn:         %s\naccount:     %s\npermissions: %s\n", w.Principal, w.ARN, w.Account, strings.Join(w.Permissions, " "))
+	if len(w.Environments) == 0 {
+		fmt.Println("\nno environments")
+		return nil
+	}
+	fmt.Println()
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "ENVIRONMENT\tPARTNER\tSTAGE\tYOU MAY")
+	for _, e := range w.Environments {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", e.Name, dash(e.Partner), e.Stage, strings.Join(e.Actions, " "))
+	}
+	return tw.Flush()
 }
 
 // cmdMint is what most developers will ever run: one command, cert on
 // disk, key backed up on the server.
 func cmdMint(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("mint", flag.ExitOnError)
-	env := fs.String("env", "dev", "environment")
-	id := fs.String("id", "", "device id (default: next free DVTADL number)")
+	env := fs.String("env", "dev", "stage (dev, prod) or full environment name")
+	partner := fs.String("partner", defaultPartner(), "partner to act for, if you may act for several")
+	id := fs.String("id", "", "device id (default: made from the MAC, or the next free number)")
+	mac := fs.String("mac", "", "the board's MAC (e.g. 3c:71:bf:4a:12:e0); device ids are made from it")
+	port := fs.String("port", "", "read the MAC from the board on this serial port with esptool")
+	esptool := fs.String("esptool", envOr("ADL_ESPTOOL", "esptool.py"), "esptool command, with --port")
+	move := fs.Bool("move", false, "the board is in another stage: assign it here (revokes its certificates there)")
 	out := fs.String("out", "certs", "output directory")
 	keyType := fs.String("key-type", "rsa2048", "rsa2048 or ecdsa-p256")
 	noEscrow := fs.Bool("no-escrow", false, "do not back up the private key on the server")
@@ -77,6 +94,20 @@ func cmdMint(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	envName, err := resolveEnv(ctx, c, *partner, *env)
+	if err != nil {
+		return err
+	}
+	if *port != "" {
+		if *mac != "" {
+			return errors.New("pass --mac or --port, not both")
+		}
+		st := &eol.Station{Port: *port, Esptool: *esptool}
+		if *mac, err = st.ReadChipMAC(ctx); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "board MAC %s\n", *mac)
+	}
 	key, err := pki.GenerateKey(*keyType)
 	if err != nil {
 		return err
@@ -89,7 +120,7 @@ func cmdMint(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	req := model.IssueRequest{Env: *env, DeviceID: *id, CSR: string(csr), Labels: lbl, Replace: *replace}
+	req := model.IssueRequest{Env: envName, DeviceID: *id, CSR: string(csr), ChipID: *mac, Labels: lbl, Replace: *replace, Move: *move}
 	if !*noEscrow {
 		req.PrivateKey = string(keyPEM)
 	}
@@ -234,16 +265,39 @@ func zipDir(dst, src string) error {
 
 func cmdList(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
-	env := fs.String("env", "", "only this environment")
+	env := fs.String("env", "", "only this stage or environment")
+	partner := fs.String("partner", defaultPartner(), "only this partner's devices")
 	asJSON := fs.Bool("json", false, "print JSON")
 	_ = fs.Parse(args)
 	c, err := newClient(ctx)
 	if err != nil {
 		return err
 	}
-	l, err := c.ListDevices(ctx, *env)
-	if err != nil {
-		return err
+	// Without --env the server lists every environment you can read.
+	envs := []string{""}
+	switch {
+	case *env != "":
+		name, err := resolveEnv(ctx, c, *partner, *env)
+		if err != nil {
+			return err
+		}
+		envs = []string{name}
+	case *partner != "":
+		w, err := c.WhoAmI(ctx)
+		if err != nil {
+			return err
+		}
+		if envs = client.PartnerEnvs(w.Environments, *partner); len(envs) == 0 {
+			return fmt.Errorf("you cannot act for %s", *partner)
+		}
+	}
+	l := &model.DeviceList{}
+	for _, e := range envs {
+		part, err := c.ListDevices(ctx, e)
+		if err != nil {
+			return err
+		}
+		l.Devices = append(l.Devices, part.Devices...)
 	}
 	if *asJSON {
 		return printJSON(l)

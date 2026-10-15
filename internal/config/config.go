@@ -18,14 +18,18 @@ import (
 
 // Environment is one entry of ADL_ENVIRONMENTS.
 type Environment struct {
-	Name           string `json:"name"`
-	KMSKeyID       string `json:"kms_key_id"`
-	DevicePrefix   string `json:"device_prefix"`
-	DeviceIDDigits int    `json:"device_id_digits,omitempty"`
-	ValidityDays   int    `json:"validity_days"`
-	AllowKeyEscrow bool   `json:"allow_key_escrow"`
-	RequireChipID  bool   `json:"require_chip_id,omitempty"`
-	CRLValidityHrs int    `json:"crl_validity_hours,omitempty"`
+	Name             string `json:"name"`
+	Partner          string `json:"partner,omitempty"`
+	Stage            string `json:"stage,omitempty"`
+	Organization     string `json:"organization,omitempty"`
+	KMSKeyID         string `json:"kms_key_id"`
+	DevicePrefix     string `json:"device_prefix"`
+	DeviceIDDigits   int    `json:"device_id_digits,omitempty"`
+	DeviceIDFromChip bool   `json:"device_id_from_chip,omitempty"`
+	ValidityDays     int    `json:"validity_days"`
+	AllowKeyEscrow   bool   `json:"allow_key_escrow"`
+	RequireChipID    bool   `json:"require_chip_id,omitempty"`
+	CRLValidityHrs   int    `json:"crl_validity_hours,omitempty"`
 }
 
 type Server struct {
@@ -130,7 +134,8 @@ func (c *Server) ServiceEnvs() []service.EnvConfig {
 	out := make([]service.EnvConfig, 0, len(c.Environments))
 	for _, e := range c.Environments {
 		out = append(out, service.EnvConfig{
-			Name: e.Name, DevicePrefix: e.DevicePrefix, DeviceIDDigits: e.DeviceIDDigits,
+			Name: e.Name, Partner: e.Partner, Stage: e.Stage, Organization: e.Organization,
+			DevicePrefix: e.DevicePrefix, DeviceIDDigits: e.DeviceIDDigits, DeviceIDFromChip: e.DeviceIDFromChip,
 			Validity:       time.Duration(e.ValidityDays) * 24 * time.Hour,
 			AllowKeyEscrow: e.AllowKeyEscrow,
 			RequireChipID:  e.RequireChipID,

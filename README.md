@@ -66,6 +66,8 @@ ceremony and the move off the droplet in
 
 How it fits together is in [docs/architecture.md](docs/architecture.md),
 and the security reasoning is in [docs/security.md](docs/security.md).
+Serving several manufacturing partners from one deployment is in
+[docs/partners.md](docs/partners.md).
 
 ## Repository layout
 
