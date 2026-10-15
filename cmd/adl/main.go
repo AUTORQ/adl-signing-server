@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -26,8 +27,8 @@ act for several partners (AutorQ staff) pick one with --partner or set a
 default with "adl configure --partner".
 
 Setup:
-  adl configure --url URL --region REGION --audience AUD [--profile AWS_PROFILE] [--partner P]
-  adl whoami
+  adl configure [--stage dev|prod] --url URL --region REGION --audience AUD [--profile AWS_PROFILE] [--partner P]
+  adl whoami [--env dev|prod]
 
 Developers:
   adl mint  [--env dev] (--mac MAC | --port PORT | --id ID) [--move] [--label k=v] [--out DIR] [--zip] [--no-escrow] [--replace]
@@ -48,7 +49,9 @@ Admin:
   adl import --env ENV --dir DIR [--with-keys] [--provisioned] [--dry-run]
   adl audit [--day YYYY-MM-DD]
 
-Commands that take --env also take --partner.
+Commands that take --env also take --partner. With one signer per stage,
+configure each with "adl configure --stage dev|prod ..."; --env then also
+picks the server (fetch, show, revoke and audit take --env for that too).
 Run "adl <command> -h" for the flags of a command.
 `
 
@@ -118,6 +121,11 @@ func defaultPartner() string {
 	return ""
 }
 
+// serverFlag adds --env to commands that only need it to pick a server.
+func serverFlag(fs *flag.FlagSet) *string {
+	return fs.String("env", "", "stage whose server to ask (dev, prod), when each stage has its own")
+}
+
 // resolveEnv maps --env (a stage or a full name) and --partner to the
 // environment the server knows, using what the caller may access.
 func resolveEnv(ctx context.Context, c *client.Client, partner, want string) (string, error) {
@@ -128,9 +136,14 @@ func resolveEnv(ctx context.Context, c *client.Client, partner, want string) (st
 	return client.ResolveEnv(w.Environments, partner, want)
 }
 
-func newClient(ctx context.Context) (*client.Client, error) {
+// newClient connects to the server for env (a stage or environment name;
+// empty for the default server).
+func newClient(ctx context.Context, env string) (*client.Client, error) {
 	cfg, err := client.LoadConfig()
 	if err != nil {
+		return nil, err
+	}
+	if cfg, err = cfg.ForEnv(env); err != nil {
 		return nil, err
 	}
 	return client.New(ctx, cfg)

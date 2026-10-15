@@ -47,3 +47,35 @@ func TestResolveEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigForEnv(t *testing.T) {
+	c := &Config{Profile: "edge-labs", Partner: "edge-labs", Stages: map[string]*Config{
+		"dev":  {URL: "https://signer.dev.autorq.com", Region: "us-east-1", Audience: "autorq-signer:dev"},
+		"prod": {URL: "https://signer.prod.autorq.com", Region: "us-east-1", Audience: "autorq-signer:prod", Profile: "edge-labs-prod"},
+	}}
+	for want, url := range map[string]string{
+		"dev": "https://signer.dev.autorq.com", "edge-labs-dev": "https://signer.dev.autorq.com",
+		"prod": "https://signer.prod.autorq.com", "acme-prod": "https://signer.prod.autorq.com",
+	} {
+		got, err := c.ForEnv(want)
+		if err != nil || got.URL != url || got.Partner != "edge-labs" {
+			t.Errorf("%s: %+v %v", want, got, err)
+		}
+	}
+	if got, _ := c.ForEnv("dev"); got.Profile != "edge-labs" {
+		t.Errorf("dev inherits the default profile, got %q", got.Profile)
+	}
+	if got, _ := c.ForEnv("prod"); got.Profile != "edge-labs-prod" {
+		t.Errorf("prod keeps its own profile, got %q", got.Profile)
+	}
+	if _, err := c.ForEnv(""); err == nil || !strings.Contains(err.Error(), "--env") {
+		t.Errorf("no default server: %v", err)
+	}
+	if _, err := c.ForEnv("staging"); err == nil {
+		t.Error("unknown stage without a default server")
+	}
+	c.URL = "https://signer.example"
+	if got, err := c.ForEnv("staging"); err != nil || got.URL != "https://signer.example" {
+		t.Errorf("falls back to the default server: %+v %v", got, err)
+	}
+}

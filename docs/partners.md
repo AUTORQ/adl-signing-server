@@ -66,5 +66,20 @@ adl mint --partner acme --env dev --mac 00:11:22:33:44:55   # operator staff
 adl ca csr --partner acme --env prod --cn "ACME Intermediate CA prod" --org ACME
 ```
 
+## One signer per stage
+
+A dev signer and a prod signer (in different AWS accounts) work too: each
+holds only its own stage's environments. MAC-based ids can't collide across
+them, but neither knows what the other issued, so a board can hold a dev
+and a prod certificate at once, and `move` doesn't apply. Configure both
+servers and `--env` picks one:
+
+```bash
+adl configure --stage dev  --url https://signer.dev.autorq.com  --region us-east-1 --audience autorq-signer:dev  --profile edge-labs-dev
+adl configure --stage prod --url https://signer.prod.autorq.com --region us-east-1 --audience autorq-signer:prod --profile edge-labs-prod
+adl mint --env dev --mac 3c:71:bf:4a:12:e0
+adl show DVTADL3C71BF4A12E0 --env prod
+```
+
 `/healthz` no longer lists environments, so anonymous callers can't
 enumerate partners.

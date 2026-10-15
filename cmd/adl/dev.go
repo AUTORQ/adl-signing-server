@@ -21,11 +21,29 @@ import (
 )
 
 func cmdConfigure(args []string) error {
-	fs := flag.NewFlagSet("configure", flag.ExitOnError)
-	cfg := &client.Config{}
+	root := &client.Config{}
 	if existing, err := client.LoadConfig(); err == nil {
-		cfg = existing
+		root = existing
 	}
+	// --stage edits that stage's server instead of the default one.
+	cfg := root
+	for i, a := range args {
+		stage, ok := strings.CutPrefix(a, "--stage=")
+		if !ok && (a == "--stage" || a == "-stage") && i+1 < len(args) {
+			stage, ok = args[i+1], true
+		}
+		if ok && stage != "" {
+			if root.Stages == nil {
+				root.Stages = map[string]*client.Config{}
+			}
+			if root.Stages[stage] == nil {
+				root.Stages[stage] = &client.Config{}
+			}
+			cfg = root.Stages[stage]
+		}
+	}
+	fs := flag.NewFlagSet("configure", flag.ExitOnError)
+	fs.String("stage", "", "configure the server of this stage (dev, prod), when each stage has its own signer")
 	fs.StringVar(&cfg.URL, "url", cfg.URL, "signing server URL (https://...)")
 	fs.StringVar(&cfg.Region, "region", cfg.Region, "AWS region the server runs in")
 	fs.StringVar(&cfg.Audience, "audience", cfg.Audience, "server audience string (from the Terraform outputs)")
@@ -39,7 +57,7 @@ func cmdConfigure(args []string) error {
 	if !cfg.Local && (cfg.Region == "" || cfg.Audience == "") {
 		return errors.New("--region and --audience are required (or --local)")
 	}
-	path, err := cfg.Save()
+	path, err := root.Save()
 	if err != nil {
 		return err
 	}
@@ -47,8 +65,11 @@ func cmdConfigure(args []string) error {
 	return nil
 }
 
-func cmdWhoami(ctx context.Context, _ []string) error {
-	c, err := newClient(ctx)
+func cmdWhoami(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("whoami", flag.ExitOnError)
+	env := serverFlag(fs)
+	_ = fs.Parse(args)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -90,7 +111,7 @@ func cmdMint(ctx context.Context, args []string) error {
 	fs.Var(lbl, "label", "key=value label, repeatable (e.g. --label board=rev-c --label owner=jane)")
 	_ = fs.Parse(args)
 
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -151,11 +172,12 @@ func cmdFetch(ctx context.Context, args []string) error {
 	serial := fs.String("serial", "", "a specific certificate (default: current)")
 	noKey := fs.Bool("no-key", false, "skip the escrowed private key")
 	zipIt := fs.Bool("zip", false, "also write <ID>.zip")
+	env := serverFlag(fs)
 	_ = fs.Parse(flags)
 	if len(pos) != 1 {
 		return errors.New("usage: adl fetch DEVICE_ID [--out DIR]")
 	}
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -269,7 +291,7 @@ func cmdList(ctx context.Context, args []string) error {
 	partner := fs.String("partner", defaultPartner(), "only this partner's devices")
 	asJSON := fs.Bool("json", false, "print JSON")
 	_ = fs.Parse(args)
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -314,11 +336,12 @@ func cmdShow(ctx context.Context, args []string) error {
 	flags, pos := splitArgs(args, "json")
 	fs := flag.NewFlagSet("show", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "print JSON")
+	env := serverFlag(fs)
 	_ = fs.Parse(flags)
 	if len(pos) != 1 {
 		return errors.New("usage: adl show DEVICE_ID")
 	}
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -361,6 +384,7 @@ func cmdRevoke(ctx context.Context, args []string) error {
 	reason := fs.String("reason", "", "keyCompromise, superseded, cessationOfOperation, affiliationChanged or unspecified")
 	serial := fs.String("serial", "", "only this certificate (default: all active certs of the device)")
 	yes := fs.Bool("yes", false, "do not ask for confirmation")
+	env := serverFlag(fs)
 	_ = fs.Parse(flags)
 	if len(pos) != 1 || *reason == "" {
 		return errors.New("usage: adl revoke DEVICE_ID --reason REASON")
@@ -368,7 +392,7 @@ func cmdRevoke(ctx context.Context, args []string) error {
 	if !*yes && !confirm(fmt.Sprintf("Revoke %s (%s)? This cannot be undone.", pos[0], *reason)) {
 		return errors.New("aborted")
 	}
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -384,8 +408,9 @@ func cmdAudit(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ExitOnError)
 	day := fs.String("day", "", "UTC day YYYY-MM-DD (default today)")
 	asJSON := fs.Bool("json", false, "print JSON")
+	env := serverFlag(fs)
 	_ = fs.Parse(args)
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,6 +38,45 @@ type Config struct {
 	// people who may act for several (AutorQ staff). Partner staff never
 	// need it: their identity only reaches their own environments.
 	Partner string `json:"partner,omitempty"`
+	// Stages holds one server per stage (dev, prod), for deployments that
+	// run a signer per stage. --env picks the server; the top-level one is
+	// the fallback.
+	Stages map[string]*Config `json:"stages,omitempty"`
+}
+
+// ForEnv returns the server to use for want, a stage (prod) or a full
+// environment name (edge-labs-prod).
+func (c *Config) ForEnv(want string) (*Config, error) {
+	if want != "" {
+		for stage, s := range c.Stages {
+			if s == nil || (want != stage && !strings.HasSuffix(want, "-"+stage)) {
+				continue
+			}
+			out := *s
+			out.Stages = nil
+			if out.Partner == "" {
+				out.Partner = c.Partner
+			}
+			if out.Profile == "" {
+				out.Profile = c.Profile
+			}
+			return &out, nil
+		}
+	}
+	if c.URL == "" {
+		stages := make([]string, 0, len(c.Stages))
+		for s := range c.Stages {
+			stages = append(stages, s)
+		}
+		sort.Strings(stages)
+		if want == "" {
+			return nil, fmt.Errorf("pass --env to pick a server (configured: %s)", strings.Join(stages, ", "))
+		}
+		return nil, fmt.Errorf("no server configured for %s (configured: %s); run `adl configure --stage ...`", want, strings.Join(stages, ", "))
+	}
+	out := *c
+	out.Stages = nil
+	return &out, nil
 }
 
 // ConfigPath is where the CLI keeps its config.
@@ -72,7 +112,7 @@ func LoadConfig() (*Config, error) {
 			*dst = v
 		}
 	}
-	if c.URL == "" {
+	if c.URL == "" && len(c.Stages) == 0 {
 		return nil, errors.New("no server configured; run `adl configure --url https://...` (ask your admin for the values)")
 	}
 	return c, nil

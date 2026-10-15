@@ -43,7 +43,7 @@ func cmdCA(ctx context.Context, args []string) error {
 	if *env == "" {
 		return errors.New("--env is required")
 	}
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func cmdImport(ctx context.Context, args []string) error {
 
 	var c *client.Client
 	if !*dryRun {
-		if c, err = newClient(ctx); err != nil {
+		if c, err = newClient(ctx, *env); err != nil {
 			return err
 		}
 		if *env, err = resolveEnv(ctx, c, *partner, *env); err != nil {
@@ -254,7 +254,7 @@ func cmdEOL(ctx context.Context, args []string) error {
 	loop := fset.Bool("loop", false, "keep going: provision, then wait for the next board")
 	_ = fset.Parse(args)
 
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
