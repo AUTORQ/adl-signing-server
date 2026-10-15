@@ -75,7 +75,8 @@ type CAStatus struct {
 }
 
 type CACSRRequest struct {
-	CommonName         string `json:"common_name"`
+	CommonName string `json:"common_name"`
+	// Organization defaults to the environment's (the partner's name).
 	Organization       string `json:"organization,omitempty"`
 	OrganizationalUnit string `json:"organizational_unit,omitempty"`
 	Country            string `json:"country,omitempty"`
@@ -108,6 +109,16 @@ type WhoAmI struct {
 	Principal   string   `json:"principal"`
 	Account     string   `json:"account"`
 	Permissions []string `json:"permissions"`
+	// Environments are the ones the caller may use, with what for.
+	Environments []EnvAccess `json:"environments"`
+}
+
+// EnvAccess is one environment a caller may use.
+type EnvAccess struct {
+	Name    string   `json:"name"`
+	Partner string   `json:"partner,omitempty"`
+	Stage   string   `json:"stage"`
+	Actions []string `json:"actions"`
 }
 
 type AuditList struct {

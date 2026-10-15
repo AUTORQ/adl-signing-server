@@ -77,6 +77,12 @@ func TestDeveloperFlowOverHTTP(t *testing.T) {
 	if who.Principal != "AWSReservedSSO_ADLDeveloper_0123/jane@edge-labs.us" {
 		t.Errorf("whoami %+v", who)
 	}
+	if len(who.Environments) != 1 || who.Environments[0].Name != "dev" || strings.Join(who.Environments[0].Actions, " ") != "issue read key-read" {
+		t.Errorf("whoami environments %+v", who.Environments)
+	}
+	if name, err := client.ResolveEnv(who.Environments, "", "dev"); err != nil || name != "dev" {
+		t.Errorf("resolve dev: %q %v", name, err)
+	}
 
 	key, _ := pki.GenerateKey("rsa2048")
 	csr, _ := pki.CreateCSR(key, pkix.Name{})

@@ -15,21 +15,41 @@ import (
 	"time"
 
 	"github.com/edge-labs/adl-signing-server/internal/client"
+	"github.com/edge-labs/adl-signing-server/internal/eol"
 	"github.com/edge-labs/adl-signing-server/internal/model"
 	"github.com/edge-labs/adl-signing-server/internal/pki"
 )
 
 func cmdConfigure(args []string) error {
-	fs := flag.NewFlagSet("configure", flag.ExitOnError)
-	cfg := &client.Config{}
+	root := &client.Config{}
 	if existing, err := client.LoadConfig(); err == nil {
-		cfg = existing
+		root = existing
 	}
+	// --stage edits that stage's server instead of the default one.
+	cfg := &root.Server
+	for i, a := range args {
+		stage, ok := strings.CutPrefix(a, "--stage=")
+		if !ok && (a == "--stage" || a == "-stage") && i+1 < len(args) {
+			stage, ok = args[i+1], true
+		}
+		if ok && stage != "" {
+			if root.Stages == nil {
+				root.Stages = map[string]*client.Server{}
+			}
+			if root.Stages[stage] == nil {
+				root.Stages[stage] = &client.Server{}
+			}
+			cfg = root.Stages[stage]
+		}
+	}
+	fs := flag.NewFlagSet("configure", flag.ExitOnError)
+	fs.String("stage", "", "configure the server of this stage (dev, prod), when each stage has its own signer")
 	fs.StringVar(&cfg.URL, "url", cfg.URL, "signing server URL (https://...)")
 	fs.StringVar(&cfg.Region, "region", cfg.Region, "AWS region the server runs in")
 	fs.StringVar(&cfg.Audience, "audience", cfg.Audience, "server audience string (from the Terraform outputs)")
 	fs.StringVar(&cfg.Profile, "profile", cfg.Profile, "AWS profile to use (e.g. your SSO profile)")
 	fs.BoolVar(&cfg.Local, "local", cfg.Local, "talk to a local `adl-signer serve -local-insecure`")
+	fs.StringVar(&root.Partner, "partner", root.Partner, "partner to act for by default, if you may act for several (\"\" to clear)")
 	_ = fs.Parse(args)
 	if cfg.URL == "" {
 		return errors.New("--url is required")
@@ -37,7 +57,7 @@ func cmdConfigure(args []string) error {
 	if !cfg.Local && (cfg.Region == "" || cfg.Audience == "") {
 		return errors.New("--region and --audience are required (or --local)")
 	}
-	path, err := cfg.Save()
+	path, err := root.Save()
 	if err != nil {
 		return err
 	}
@@ -45,8 +65,11 @@ func cmdConfigure(args []string) error {
 	return nil
 }
 
-func cmdWhoami(ctx context.Context, _ []string) error {
-	c, err := newClient(ctx)
+func cmdWhoami(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("whoami", flag.ExitOnError)
+	env := serverFlag(fs)
+	_ = fs.Parse(args)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -54,16 +77,30 @@ func cmdWhoami(ctx context.Context, _ []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("principal:   %s\narn:         %s\npermissions: %s\n", w.Principal, w.ARN, strings.Join(w.Permissions, " "))
-	return nil
+	fmt.Printf("principal:   %s\narn:         %s\naccount:     %s\npermissions: %s\n", w.Principal, w.ARN, w.Account, strings.Join(w.Permissions, " "))
+	if len(w.Environments) == 0 {
+		fmt.Println("\nno environments")
+		return nil
+	}
+	fmt.Println()
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "ENVIRONMENT\tPARTNER\tSTAGE\tYOU MAY")
+	for _, e := range w.Environments {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", e.Name, dash(e.Partner), e.Stage, strings.Join(e.Actions, " "))
+	}
+	return tw.Flush()
 }
 
 // cmdMint is what most developers will ever run: one command, cert on
 // disk, key backed up on the server.
 func cmdMint(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("mint", flag.ExitOnError)
-	env := fs.String("env", "dev", "environment")
-	id := fs.String("id", "", "device id (default: next free DVTADL number)")
+	env := stageFlag(fs, "dev", "stage (dev, prod)")
+	partner := fs.String("partner", defaultPartner(), "partner to act for, if you may act for several")
+	id := fs.String("id", "", "device id (default: made from the MAC, or the next free number)")
+	mac := fs.String("mac", "", "the board's MAC (e.g. 3c:71:bf:4a:12:e0); device ids are made from it")
+	port := fs.String("port", "", "read the MAC from the board on this serial port with esptool")
+	esptool := fs.String("esptool", envOr("ADL_ESPTOOL", "esptool.py"), "esptool command, with --port")
 	out := fs.String("out", "certs", "output directory")
 	keyType := fs.String("key-type", "rsa2048", "rsa2048 or ecdsa-p256")
 	noEscrow := fs.Bool("no-escrow", false, "do not back up the private key on the server")
@@ -73,9 +110,23 @@ func cmdMint(ctx context.Context, args []string) error {
 	fs.Var(lbl, "label", "key=value label, repeatable (e.g. --label board=rev-c --label owner=jane)")
 	_ = fs.Parse(args)
 
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
+	}
+	envName, err := resolveEnv(ctx, c, *partner, *env)
+	if err != nil {
+		return err
+	}
+	if *port != "" {
+		if *mac != "" {
+			return errors.New("pass --mac or --port, not both")
+		}
+		st := &eol.Station{Port: *port, Esptool: *esptool}
+		if *mac, err = st.ReadChipMAC(ctx); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "board MAC %s\n", *mac)
 	}
 	key, err := pki.GenerateKey(*keyType)
 	if err != nil {
@@ -89,7 +140,7 @@ func cmdMint(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	req := model.IssueRequest{Env: *env, DeviceID: *id, CSR: string(csr), Labels: lbl, Replace: *replace}
+	req := model.IssueRequest{Env: envName, DeviceID: *id, CSR: string(csr), ChipID: *mac, Labels: lbl, Replace: *replace}
 	if !*noEscrow {
 		req.PrivateKey = string(keyPEM)
 	}
@@ -120,11 +171,12 @@ func cmdFetch(ctx context.Context, args []string) error {
 	serial := fs.String("serial", "", "a specific certificate (default: current)")
 	noKey := fs.Bool("no-key", false, "skip the escrowed private key")
 	zipIt := fs.Bool("zip", false, "also write <ID>.zip")
+	env := serverFlag(fs)
 	_ = fs.Parse(flags)
 	if len(pos) != 1 {
 		return errors.New("usage: adl fetch DEVICE_ID [--out DIR]")
 	}
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -234,16 +286,39 @@ func zipDir(dst, src string) error {
 
 func cmdList(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
-	env := fs.String("env", "", "only this environment")
+	env := stageFlag(fs, "", "only this stage")
+	partner := fs.String("partner", defaultPartner(), "only this partner's devices")
 	asJSON := fs.Bool("json", false, "print JSON")
 	_ = fs.Parse(args)
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
-	l, err := c.ListDevices(ctx, *env)
-	if err != nil {
-		return err
+	// Without --stage the server lists every environment you can read.
+	envs := []string{""}
+	switch {
+	case *env != "":
+		name, err := resolveEnv(ctx, c, *partner, *env)
+		if err != nil {
+			return err
+		}
+		envs = []string{name}
+	case *partner != "":
+		w, err := c.WhoAmI(ctx)
+		if err != nil {
+			return err
+		}
+		if envs = client.PartnerEnvs(w.Environments, *partner); len(envs) == 0 {
+			return fmt.Errorf("you cannot act for %s", *partner)
+		}
+	}
+	l := &model.DeviceList{}
+	for _, e := range envs {
+		part, err := c.ListDevices(ctx, e)
+		if err != nil {
+			return err
+		}
+		l.Devices = append(l.Devices, part.Devices...)
 	}
 	if *asJSON {
 		return printJSON(l)
@@ -260,11 +335,12 @@ func cmdShow(ctx context.Context, args []string) error {
 	flags, pos := splitArgs(args, "json")
 	fs := flag.NewFlagSet("show", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "print JSON")
+	env := serverFlag(fs)
 	_ = fs.Parse(flags)
 	if len(pos) != 1 {
 		return errors.New("usage: adl show DEVICE_ID")
 	}
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -307,6 +383,7 @@ func cmdRevoke(ctx context.Context, args []string) error {
 	reason := fs.String("reason", "", "keyCompromise, superseded, cessationOfOperation, affiliationChanged or unspecified")
 	serial := fs.String("serial", "", "only this certificate (default: all active certs of the device)")
 	yes := fs.Bool("yes", false, "do not ask for confirmation")
+	env := serverFlag(fs)
 	_ = fs.Parse(flags)
 	if len(pos) != 1 || *reason == "" {
 		return errors.New("usage: adl revoke DEVICE_ID --reason REASON")
@@ -314,7 +391,7 @@ func cmdRevoke(ctx context.Context, args []string) error {
 	if !*yes && !confirm(fmt.Sprintf("Revoke %s (%s)? This cannot be undone.", pos[0], *reason)) {
 		return errors.New("aborted")
 	}
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}
@@ -330,8 +407,9 @@ func cmdAudit(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ExitOnError)
 	day := fs.String("day", "", "UTC day YYYY-MM-DD (default today)")
 	asJSON := fs.Bool("json", false, "print JSON")
+	env := serverFlag(fs)
 	_ = fs.Parse(args)
-	c, err := newClient(ctx)
+	c, err := newClient(ctx, *env)
 	if err != nil {
 		return err
 	}

@@ -189,7 +189,10 @@ func decode(body []byte, v any) error {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "environments": s.svc.Envs()})
+	// No environment list: in a shared deployment it would name every
+	// partner to anyone on the internet. Signed-in callers get theirs
+	// from /v1/whoami.
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (s *Server) caStatus(w http.ResponseWriter, r *http.Request) {
@@ -228,7 +231,8 @@ func (s *Server) crl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) whoami(w http.ResponseWriter, _ *http.Request, p *auth.Principal, _ []byte) {
-	writeJSON(w, http.StatusOK, model.WhoAmI{ARN: p.ARN, Principal: p.Name(), Account: p.Account, Permissions: p.Permissions})
+	writeJSON(w, http.StatusOK, model.WhoAmI{ARN: p.ARN, Principal: p.Name(), Account: p.Account, Permissions: p.Permissions,
+		Environments: s.svc.Access(p)})
 }
 
 func (s *Server) caCSR(w http.ResponseWriter, r *http.Request, p *auth.Principal, body []byte) {

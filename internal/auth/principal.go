@@ -110,7 +110,14 @@ type Policy struct {
 // Binding grants permissions to roles and/or users matching glob patterns.
 // Role patterns let you match IAM Identity Center roles such as
 // "AWSReservedSSO_ADLDeveloper_*".
+//
+// Accounts, when set, limits the binding to callers from those accounts.
+// Role names are only unique within an account, so a deployment shared by
+// several organisations (one AWS account per manufacturing partner) should
+// scope every binding: otherwise a partner could create a role named like
+// an AutorQ admin's in their own account and match its binding.
 type Binding struct {
+	Accounts    []string `json:"accounts,omitempty"`
 	Roles       []string `json:"roles,omitempty"`
 	Users       []string `json:"users,omitempty"`
 	Permissions []string `json:"permissions"`
@@ -121,6 +128,7 @@ type Binding struct {
 var ReservedNames = []string{"ca", "admin", "audit"}
 
 var (
+	accountRE   = regexp.MustCompile(`^\d{12}$`)
 	envActionRE = regexp.MustCompile(`^[a-z][a-z0-9-]*:(\*|issue|read|key-read|provision|revoke)$`)
 	globalPerms = []string{"*", "ca:admin", "audit:read", "admin:import"}
 )
@@ -131,13 +139,18 @@ func (p *Policy) Validate() error {
 		return errors.New("auth policy: at least one account is required")
 	}
 	for _, a := range p.Accounts {
-		if !regexp.MustCompile(`^\d{12}$`).MatchString(a) {
+		if !accountRE.MatchString(a) {
 			return fmt.Errorf("auth policy: bad account id %q", a)
 		}
 	}
 	for i, b := range p.Bindings {
 		if len(b.Roles) == 0 && len(b.Users) == 0 {
 			return fmt.Errorf("auth policy: binding %d has no roles or users", i)
+		}
+		for _, a := range b.Accounts {
+			if !slices.Contains(p.Accounts, a) {
+				return fmt.Errorf("auth policy: binding %d names account %q, which is not in accounts", i, a)
+			}
 		}
 		for _, pat := range append(slices.Clone(b.Roles), b.Users...) {
 			if _, err := path.Match(pat, ""); err != nil {
@@ -165,6 +178,9 @@ func (pol *Policy) Resolve(p *Principal) error {
 	}
 	var perms []string
 	for _, b := range pol.Bindings {
+		if len(b.Accounts) > 0 && !slices.Contains(b.Accounts, p.Account) {
+			continue
+		}
 		var patterns []string
 		var subject string
 		switch p.Kind {

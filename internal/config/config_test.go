@@ -65,3 +65,23 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 		})
 	}
 }
+
+// The shape the AutorQ Terraform stack emits for a shared deployment.
+func TestLoadPartners(t *testing.T) {
+	setValid(t)
+	t.Setenv("ADL_ENVIRONMENTS", `[
+		{"name":"edge-labs-dev","partner":"edge-labs","stage":"dev","organization":"EDGE Labs","kms_key_id":"arn:a","device_prefix":"DVTADL","device_id_from_chip":true,"validity_days":3650,"allow_key_escrow":true}
+	]`)
+	t.Setenv("ADL_AUTH_POLICY", `{"accounts":["123456789012","222222222222"],"bindings":[{"accounts":["222222222222"],"roles":["*"],"users":["*"],"permissions":["edge-labs-dev:issue"]}]}`)
+	c, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := c.ServiceEnvs()[0]
+	if e.Partner != "edge-labs" || e.Stage != "dev" || e.Organization != "EDGE Labs" || !e.DeviceIDFromChip {
+		t.Errorf("env %+v", e)
+	}
+	if b := c.AuthPolicy.Bindings[0]; len(b.Accounts) != 1 || b.Accounts[0] != "222222222222" {
+		t.Errorf("binding %+v", b)
+	}
+}

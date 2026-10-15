@@ -28,14 +28,34 @@ import (
 )
 
 // EnvConfig is the per environment policy (dev, prod, ...).
+//
+// A deployment shared by several manufacturing partners has one environment
+// per partner and stage, named <partner>-<stage> (edge-labs-dev,
+// edge-labs-prod), each with its own intermediate CA. Permissions are per
+// environment, so a partner's people only ever touch their own.
 type EnvConfig struct {
 	Name string
+	// Partner is the manufacturing partner the environment belongs to,
+	// empty for a single-tenant deployment.
+	Partner string
+	// Stage is the gateway the certificates are for (dev, prod). Defaults
+	// to Name.
+	Stage string
+	// Organization is the partner's name as it appears in O= on its
+	// device certificates and intermediate CSRs; Partner is its id.
+	// Required with Partner; otherwise defaults to Options.Organization.
+	Organization string
 	// DevicePrefix and DeviceIDDigits shape allocated IDs: DVTADL + 017.
 	// Environments with the same prefix share one counter, which is how
 	// the legacy numbering worked.
 	DevicePrefix   string
 	DeviceIDDigits int
-	Validity       time.Duration
+	// DeviceIDFromChip makes device IDs DevicePrefix + the chip's MAC in
+	// upper case hex, instead of a counter. A board keeps the same ID
+	// whichever signer or stage issues it, and every certificate needs
+	// the chip's MAC (so RequireChipID is implied).
+	DeviceIDFromChip bool
+	Validity         time.Duration
 	// AllowKeyEscrow lets clients upload the private key for safekeeping.
 	// On for dev so people stop losing keys, off for prod where keys
 	// should only ever exist on the device.
@@ -73,7 +93,10 @@ var (
 	DefaultDeviceIDPattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{2,31}$`)
 	labelKeyRE             = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,31}$`)
 	chipRE                 = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
-	envNameRE              = regexp.MustCompile(`^[a-z][a-z0-9-]{0,15}$`)
+	macRE                  = regexp.MustCompile(`^[0-9a-f]{12}$`)
+	envNameRE              = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	partnerRE              = regexp.MustCompile(`^[a-z][a-z0-9-]{0,20}$`)
+	stageRE                = regexp.MustCompile(`^[a-z][a-z0-9]{0,9}$`)
 )
 
 func New(o Options) (*Service, error) {
@@ -94,10 +117,32 @@ func New(o Options) (*Service, error) {
 		if e.CRLValidity == 0 {
 			e.CRLValidity = 7 * 24 * time.Hour
 		}
+		if e.Stage == "" {
+			e.Stage = e.Name
+		}
+		if e.Partner != "" {
+			if !partnerRE.MatchString(e.Partner) || !stageRE.MatchString(e.Stage) || e.Name != e.Partner+"-"+e.Stage {
+				return nil, fmt.Errorf("service: env %s must be named <partner>-<stage> (%s-%s)", e.Name, e.Partner, e.Stage)
+			}
+			// The server-wide default would put one partner's name on
+			// another's certificates.
+			if strings.TrimSpace(e.Organization) == "" {
+				return nil, fmt.Errorf("service: env %s belongs to partner %s and needs its own organization", e.Name, e.Partner)
+			}
+		}
+		if e.DeviceIDFromChip {
+			e.RequireChipID = true
+		}
+		if _, dup := envs[e.Name]; dup {
+			return nil, fmt.Errorf("service: env %s is configured twice", e.Name)
+		}
 		envs[e.Name] = e
 	}
 	if len(envs) == 0 {
 		return nil, errors.New("service: no environments configured")
+	}
+	if err := checkPartners(envs); err != nil {
+		return nil, err
 	}
 	s := &Service{store: o.Store, archive: o.Archive, cas: o.CAs, envs: envs, org: o.Organization,
 		idRE: o.DeviceIDPattern, now: o.Now, log: o.Log}
@@ -111,6 +156,35 @@ func New(o Options) (*Service, error) {
 		s.log = slog.Default()
 	}
 	return s, nil
+}
+
+// checkPartners keeps device IDs unambiguous: one partner's stages share a
+// prefix and an ID scheme (so a board keeps its ID across stages), and no
+// two partners' prefixes overlap (DVT would otherwise read like DVTADL).
+func checkPartners(envs map[string]EnvConfig) error {
+	type scheme struct {
+		prefix   string
+		fromChip bool
+	}
+	byPartner := map[string]scheme{}
+	for _, e := range envs {
+		if e.Partner == "" {
+			continue
+		}
+		sc := scheme{e.DevicePrefix, e.DeviceIDFromChip}
+		if prev, ok := byPartner[e.Partner]; ok && prev != sc {
+			return fmt.Errorf("service: every stage of partner %s needs the same device prefix and id scheme", e.Partner)
+		}
+		byPartner[e.Partner] = sc
+	}
+	for a, sa := range byPartner {
+		for b, sb := range byPartner {
+			if a != b && strings.HasPrefix(sb.prefix, sa.prefix) {
+				return fmt.Errorf("service: device prefix %q of %s overlaps %q of %s", sa.prefix, a, sb.prefix, b)
+			}
+		}
+	}
+	return nil
 }
 
 // Envs lists configured environment names.
@@ -129,6 +203,36 @@ func (s *Service) env(name string) (EnvConfig, error) {
 		return e, badRequest("unknown environment %q (have %s)", name, strings.Join(s.Envs(), ", "))
 	}
 	return e, nil
+}
+
+// envActions are the per environment permissions, in display order.
+var envActions = []string{"issue", "read", "key-read", "provision", "revoke"}
+
+// Access lists the environments p may use and what it may do in each. The
+// CLI uses it to pick the right environment from a stage name (and the
+// partner, for people who act for more than one).
+func (s *Service) Access(p *auth.Principal) []model.EnvAccess {
+	out := []model.EnvAccess{}
+	for _, name := range s.Envs() {
+		e := s.envs[name]
+		var actions []string
+		for _, a := range envActions {
+			if p.Can(name + ":" + a) {
+				actions = append(actions, a)
+			}
+		}
+		if len(actions) > 0 {
+			out = append(out, model.EnvAccess{Name: name, Partner: e.Partner, Stage: e.Stage, Actions: actions})
+		}
+	}
+	return out
+}
+
+func (s *Service) organization(e EnvConfig) string {
+	if e.Organization != "" {
+		return e.Organization
+	}
+	return s.org
 }
 
 func require(p *auth.Principal, perm string) error {
@@ -240,6 +344,22 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 	if env.RequireChipID && chip == "" && !req.Replace {
 		return nil, badRequest("%s certificates must be bound to a chip; chip_id is required", env.Name)
 	}
+	fromChip := false
+	if env.DeviceIDFromChip {
+		switch {
+		case chip != "":
+			if !macRE.MatchString(chip) {
+				return nil, badRequest("chip_id %q is not the board's 6 byte MAC; %s device ids are made from it", req.ChipID, env.Name)
+			}
+			want := env.DevicePrefix + strings.ToUpper(chip)
+			if req.DeviceID != "" && req.DeviceID != want {
+				return nil, badRequest("device %s has id %s in %s (prefix + chip MAC), not %s", chip, want, env.Name, req.DeviceID)
+			}
+			req.DeviceID, fromChip = want, true
+		case req.DeviceID == "" || !req.Replace:
+			return nil, badRequest("%s device ids are made from the board's MAC: chip_id is required (adl --mac or --port)", env.Name)
+		}
+	}
 	if err := checkLabels(req.Labels); err != nil {
 		return nil, err
 	}
@@ -268,7 +388,7 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 		case errors.Is(err, store.ErrNotFound):
 			// Numbers in the managed range come from the allocator, so
 			// nobody can claim DVTADL99999 and push the counter out.
-			if _, managed := sequenceNumber(env.DevicePrefix, id); managed && !p.Can("admin:import") {
+			if _, managed := sequenceNumber(env.DevicePrefix, id); managed && !env.DeviceIDFromChip && !p.Can("admin:import") {
 				return nil, badRequest("ids starting with %s are allocated by the server; leave device_id empty", env.DevicePrefix)
 			}
 			dev = &model.Device{ID: id, Env: env.Name, Status: model.DevicePending, ChipID: chip,
@@ -280,7 +400,7 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 				return nil, mapStoreErr(err)
 			}
 			// Keep the allocator from handing this number out later.
-			if n, ok := sequenceNumber(env.DevicePrefix, id); ok {
+			if n, ok := sequenceNumber(env.DevicePrefix, id); ok && !env.DeviceIDFromChip {
 				if err := s.store.EnsureSequenceAtLeast(ctx, seqName(env.DevicePrefix), n); err != nil {
 					return nil, err
 				}
@@ -290,6 +410,12 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 		default:
 			if dev.Env != env.Name {
 				return nil, conflict("env_mismatch", map[string]string{"device_id": id, "env": dev.Env}, "device %s belongs to %s", id, dev.Env)
+			}
+			if fromChip && !req.Replace && dev.Status != model.DevicePending {
+				// Same answer as a chip claim, which is what EoL stations
+				// expect when a board comes round a second time.
+				return nil, conflict("chip_already_assigned", map[string]string{"chip_id": chip, "device_id": id},
+					"chip %s is already assigned to device %s", chip, id)
 			}
 			if !req.Replace && dev.Status != model.DevicePending {
 				return nil, conflict("device_exists", map[string]string{"device_id": id, "status": string(dev.Status)},
@@ -320,7 +446,7 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 	}
 
 	cert, err := iss.IssueDevice(dev.ID, csr.PublicKey, pki.DeviceProfile{
-		Organization: s.org, Validity: env.Validity, Backdate: 5 * time.Minute,
+		Organization: s.organization(env), Validity: env.Validity, Backdate: 5 * time.Minute,
 	}, now)
 	if err != nil {
 		return nil, err
@@ -761,6 +887,9 @@ func (s *Service) CACSR(ctx context.Context, p *auth.Principal, envName string, 
 		return nil, err
 	}
 	subj := pkix.Name{CommonName: req.CommonName}
+	if req.Organization == "" {
+		req.Organization = s.organization(env)
+	}
 	if req.Organization != "" {
 		subj.Organization = []string{req.Organization}
 	}
