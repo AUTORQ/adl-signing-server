@@ -22,18 +22,18 @@ import (
 
 func cmdCA(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: adl ca status|csr|install|crl --env ENV")
+		return errors.New("usage: adl ca status|csr|install|crl --stage S")
 	}
 	sub, args := args[0], args[1:]
 	fset := flag.NewFlagSet("ca "+sub, flag.ExitOnError)
-	env := fset.String("env", "", "stage (dev, prod) or full environment name")
+	env := stageFlag(fset, "", "stage (dev, prod)")
 	partner := fset.String("partner", defaultPartner(), "partner whose intermediate this is")
 	out := fset.String("out", "", "write output to this file")
 	var cn, org, ou, country, chainFile *string
 	switch sub {
 	case "csr":
 		cn = fset.String("cn", "", "common name, e.g. \"EDGE Labs Intermediate CA prod\"")
-		org = fset.String("org", "", "organization (the partner's name)")
+		org = fset.String("org", "", "O= of the CSR (default: the environment's organization, i.e. the partner's name)")
 		ou = fset.String("ou", "IoT Devices", "organizational unit")
 		country = fset.String("country", "US", "country")
 	case "install":
@@ -41,7 +41,7 @@ func cmdCA(ctx context.Context, args []string) error {
 	}
 	_ = fset.Parse(args)
 	if *env == "" {
-		return errors.New("--env is required")
+		return errors.New("--stage is required")
 	}
 	c, err := newClient(ctx, *env)
 	if err != nil {
@@ -69,8 +69,8 @@ func cmdCA(ctx context.Context, args []string) error {
 		}
 		return nil
 	case "csr":
-		if *cn == "" || *org == "" {
-			return errors.New("--cn and --org are required")
+		if *cn == "" {
+			return errors.New("--cn is required")
 		}
 		r, err := c.CACSR(ctx, *env, model.CACSRRequest{CommonName: *cn, Organization: *org, OrganizationalUnit: *ou, Country: *country})
 		if err != nil {
@@ -123,7 +123,7 @@ var legacyCertRE = regexp.MustCompile(`^device-([A-Za-z0-9_-]+)\.crt$`)
 // every device certificate in it.
 func cmdImport(ctx context.Context, args []string) error {
 	fset := flag.NewFlagSet("import", flag.ExitOnError)
-	env := fset.String("env", "", "stage or environment the certs belong to")
+	env := stageFlag(fset, "", "stage the certs belong to")
 	partner := fset.String("partner", defaultPartner(), "partner the certs belong to")
 	dir := fset.String("dir", "", "directory to scan (e.g. a copy of dev-keys/device)")
 	withKeys := fset.Bool("with-keys", false, "also escrow device-<ID>.key files (only allowed where escrow is on)")
@@ -131,7 +131,7 @@ func cmdImport(ctx context.Context, args []string) error {
 	dryRun := fset.Bool("dry-run", false, "show what would be imported")
 	_ = fset.Parse(args)
 	if *env == "" || *dir == "" {
-		return errors.New("--env and --dir are required")
+		return errors.New("--stage and --dir are required")
 	}
 
 	type found struct{ cert, key, chain string }
@@ -237,9 +237,8 @@ func cmdEOL(ctx context.Context, args []string) error {
 	}
 	sub, args := args[0], args[1:]
 	fset := flag.NewFlagSet("eol "+sub, flag.ExitOnError)
-	env := fset.String("env", "prod", "stage (dev, prod) or environment to provision into")
+	env := stageFlag(fset, "prod", "stage to provision into")
 	partner := fset.String("partner", defaultPartner(), "partner to act for, if you may act for several")
-	move := fset.Bool("move", false, "boards already in another stage are assigned here (revokes their certificates there)")
 	station := fset.String("station", os.Getenv("ADL_STATION"), "station name, recorded against every device (env ADL_STATION)")
 	port := fset.String("port", os.Getenv("ADL_PORT"), "serial port of the board, e.g. /dev/ttyUSB0 (env ADL_PORT)")
 	chip := fset.String("chip", "esp32s3", "esptool chip type")
@@ -282,7 +281,7 @@ func cmdEOL(ctx context.Context, args []string) error {
 		}
 		in := bufio.NewReader(os.Stdin)
 		for {
-			res, err := st.Provision(ctx, eol.Options{DeviceID: *id, Reissue: *reissue, Move: *move})
+			res, err := st.Provision(ctx, eol.Options{DeviceID: *id, Reissue: *reissue})
 			if err != nil {
 				banner("FAIL", err.Error())
 			} else {

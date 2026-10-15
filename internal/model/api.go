@@ -17,11 +17,6 @@ type IssueRequest struct {
 	// Replace re-issues a certificate for an existing device and revokes
 	// the previous one as superseded.
 	Replace bool `json:"replace,omitempty"`
-	// Move assigns a device that is in another stage of the same partner
-	// (dev -> prod or back) to Env. Its certificates there are revoked
-	// (cessationOfOperation) once the new one is issued, so a device is
-	// only ever live in one stage. Needs revoke on the old environment.
-	Move bool `json:"move,omitempty"`
 }
 
 type IssueResponse struct {
@@ -80,7 +75,8 @@ type CAStatus struct {
 }
 
 type CACSRRequest struct {
-	CommonName         string `json:"common_name"`
+	CommonName string `json:"common_name"`
+	// Organization defaults to the environment's (the partner's name).
 	Organization       string `json:"organization,omitempty"`
 	OrganizationalUnit string `json:"organizational_unit,omitempty"`
 	Country            string `json:"country,omitempty"`

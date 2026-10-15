@@ -15,6 +15,7 @@ import (
 	"github.com/edge-labs/adl-signing-server/internal/auth"
 	"github.com/edge-labs/adl-signing-server/internal/kmssigner"
 	"github.com/edge-labs/adl-signing-server/internal/model"
+	"github.com/edge-labs/adl-signing-server/internal/pki"
 	"github.com/edge-labs/adl-signing-server/internal/service"
 	"github.com/edge-labs/adl-signing-server/internal/store"
 )
@@ -41,10 +42,6 @@ func partnerPerms(partner string) []string {
 var (
 	john = &auth.Principal{ARN: "arn:aws:iam::222222222222:user/john", Account: "222222222222", Kind: "user", User: "john", Permissions: partnerPerms("edge-labs")}
 	tony = &auth.Principal{ARN: "arn:aws:iam::333333333333:user/tony", Account: "333333333333", Kind: "user", User: "tony", Permissions: partnerPerms("acme")}
-	// eddy may issue in dev and prod but not revoke, so he cannot move
-	// boards between stages.
-	eddy = &auth.Principal{ARN: "arn:aws:iam::222222222222:user/eddy", Account: "222222222222", Kind: "user", User: "eddy",
-		Permissions: []string{"edge-labs-dev:issue", "edge-labs-dev:read", "edge-labs-prod:issue", "edge-labs-prod:read"}}
 )
 
 func newPartnerHarness(t *testing.T) *harness {
@@ -173,62 +170,22 @@ func TestDeviceIDComesFromTheMAC(t *testing.T) {
 	}
 }
 
-func TestMoveBetweenStages(t *testing.T) {
+// Within one deployment a device id lives in one environment. (AutorQ runs
+// a signer per stage, so dev and prod never meet in one registry.)
+func TestDeviceStaysInItsEnvironment(t *testing.T) {
 	h := newPartnerHarness(t)
-	ctx := context.Background()
-	const mac, id = "3c71bf4a12e0", "DVTADL3C71BF4A12E0"
-
-	dev, err := h.issueChip(t, john, "edge-labs-dev", mac, nil)
-	if err != nil {
+	const mac = "3c71bf4a12e0"
+	if _, err := h.issueChip(t, john, "edge-labs-dev", mac, nil); err != nil {
 		t.Fatal(err)
 	}
-	// One serial, one stage at a time.
 	if _, err := h.issueChip(t, john, "edge-labs-prod", mac, nil); errCode(err) != "env_mismatch" {
-		t.Fatalf("prod cert for a dev board without move: %v", err)
+		t.Fatalf("same board in another environment: %v", err)
 	}
-	if _, err := h.issueChip(t, eddy, "edge-labs-prod", mac, func(r *model.IssueRequest) { r.Move = true }); errCode(err) != "forbidden" {
-		t.Errorf("moving needs revoke on the old stage: %v", err)
-	}
-	if _, err := h.issueChip(t, tony, "acme-prod", mac, func(r *model.IssueRequest) { r.Move = true }); err != nil {
-		// A different partner's prefix makes a different device; nothing
-		// of EDGE Labs' is touched.
-		t.Fatalf("acme: %v", err)
-	}
-
-	prod, err := h.issueChip(t, john, "edge-labs-prod", mac, func(r *model.IssueRequest) { r.Move = true })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if prod.Device.ID != id || prod.Device.Env != "edge-labs-prod" {
-		t.Fatalf("moved device: %+v", prod.Device)
-	}
-	h.verify(t, "edge-labs-prod", prod)
-
-	d, err := h.svc.GetDevice(ctx, john, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range d.Certificates {
-		active := c.Status == model.CertActive
-		if (c.Serial == prod.Certificate.Serial) != active {
-			t.Errorf("cert %s (%s) status %s", c.Serial, c.Env, c.Status)
-		}
-		if c.Serial == dev.Certificate.Serial && c.RevocationReason != "cessationOfOperation" {
-			t.Errorf("dev cert revoked as %q", c.RevocationReason)
-		}
-	}
-	if crl := h.crl(t, "edge-labs-dev"); len(crl.RevokedCertificateEntries) != 1 {
-		t.Errorf("dev CRL has %d entries, want the moved board's dev cert", len(crl.RevokedCertificateEntries))
-	}
-	l, err := h.svc.ListDevices(ctx, john, "edge-labs-dev")
-	if err != nil || len(l.Devices) != 0 {
-		t.Errorf("dev still lists %v (%v)", l, err)
-	}
-
-	// And back again.
-	back, err := h.issueChip(t, john, "edge-labs-dev", mac, func(r *model.IssueRequest) { r.Move = true })
-	if err != nil || back.Device.Env != "edge-labs-dev" {
-		t.Fatalf("move back: %v", err)
+	// Another partner's prefix makes another device; nothing of EDGE
+	// Labs' is touched.
+	resp, err := h.issueChip(t, tony, "acme-prod", mac, nil)
+	if err != nil || resp.Device.ID != "BBB3C71BF4A12E0" {
+		t.Fatalf("acme: %+v %v", resp, err)
 	}
 }
 
@@ -239,6 +196,7 @@ func TestPartnerEnvironmentConfigChecks(t *testing.T) {
 		"stages of a partner differ":     func(e []service.EnvConfig) { e[1].DevicePrefix = "DVTX" },
 		"one stage counts, one uses MAC": func(e []service.EnvConfig) { e[1].DeviceIDFromChip = false },
 		"prefixes overlap":               func(e []service.EnvConfig) { e[2].DevicePrefix, e[3].DevicePrefix = "DVT", "DVT" },
+		"partner without its own O=":     func(e []service.EnvConfig) { e[2].Organization = "" },
 	} {
 		envs := base()
 		mutate(envs)
@@ -249,5 +207,21 @@ func TestPartnerEnvironmentConfigChecks(t *testing.T) {
 		} else {
 			t.Logf("%s: %v", name, err)
 		}
+	}
+}
+
+// An intermediate CSR carries the partner's name unless told otherwise.
+func TestCSRDefaultsToThePartnersOrganization(t *testing.T) {
+	h := newPartnerHarness(t)
+	r, err := h.svc.CACSR(context.Background(), admin, "acme-prod", model.CACSRRequest{CommonName: "ACME Intermediate CA prod"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	csr, err := pki.ParseCSR([]byte(r.CSRPEM))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(csr.Subject.Organization, []string{"ACME"}) {
+		t.Errorf("subject %s", csr.Subject)
 	}
 }

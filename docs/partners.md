@@ -1,84 +1,73 @@
 # Several manufacturing partners on one server
 
-One deployment can serve every manufacturing partner. Each partner gets one
-environment per stage, named `<partner>-<stage>`, with its own intermediate
-CA (KMS key) and O=:
+One deployment can serve every manufacturing partner. AutorQ runs one per
+stage (a dev signer and a prod signer, in different AWS accounts).
+
+## Words
+
+| Word | Means | Example |
+|---|---|---|
+| partner | a manufacturing partner, by id | `edge-labs` |
+| organization | the partner's name in O= on its device certificates and intermediate CSRs. Required for every partner environment | `EDGE Labs` |
+| stage | which gateway the certificates are for | `dev`, `prod` |
+| environment | one partner's stage on a signer, `<partner>-<stage>`; its own intermediate (KMS key) and permissions. Users never type it | `edge-labs-prod` |
+| device id | the certificate CN: the partner's prefix + the board's MAC, the same in every stage | `DVTADL3C71BF4A12E0` |
+| serial | the certificate's X.509 serial number, never the device id | `1BA770E3...` |
+| chip_id | the board's MAC in the API (`adl --mac`, or read with `--port`) | `3c71bf4a12e0` |
 
 ```json
 [
-  {"name": "edge-labs-dev",  "partner": "edge-labs", "stage": "dev",  "organization": "EDGE Labs",
-   "kms_key_id": "...", "device_prefix": "DVTADL", "device_id_from_chip": true, "require_chip_id": true,
-   "validity_days": 3650, "allow_key_escrow": true},
   {"name": "edge-labs-prod", "partner": "edge-labs", "stage": "prod", "organization": "EDGE Labs",
-   "kms_key_id": "...", "device_prefix": "DVTADL", "device_id_from_chip": true, "require_chip_id": true,
-   "validity_days": 3650}
+   "kms_key_id": "...", "device_prefix": "DVTADL", "device_id_from_chip": true, "validity_days": 3650}
 ]
 ```
 
+`device_id_from_chip` implies `require_chip_id`. There is no counter: a
+board gets the same device id from the dev and the prod signer without them
+sharing anything. Within one signer a device id belongs to one environment.
+All stages of a partner must share the prefix and id scheme, and partners'
+prefixes must not overlap; the server refuses to start otherwise.
+
 ## Who acts for which partner
 
-Bindings in `ADL_AUTH_POLICY` take `accounts`. Give each partner its own AWS
-account and bind it to that partner's environments only:
+Bindings in `ADL_AUTH_POLICY` take `accounts`, the accounts whose
+identities the binding matches (the top-level `accounts` is who may call at
+all). Name and role patterns are only unique within an account, so with
+more than one account scope every binding:
 
 ```json
 {"accounts": ["111111111111", "222222222222"],
  "bindings": [
    {"accounts": ["111111111111"], "roles": ["AWSReservedSSO_AdministratorAccess_*"], "permissions": ["*"]},
-   {"accounts": ["222222222222"], "roles": ["*"], "users": ["*"],
-    "permissions": ["edge-labs-dev:issue", "edge-labs-dev:read", "edge-labs-prod:issue", "edge-labs-prod:read", "edge-labs-prod:provision"]}
+   {"accounts": ["111111111111"], "users": ["edge-labs"],
+    "permissions": ["edge-labs-prod:issue", "edge-labs-prod:read", "edge-labs-prod:provision", "edge-labs-prod:revoke"]},
+   {"accounts": ["222222222222"], "roles": ["*"], "users": ["*"], "permissions": ["acme-prod:issue", "acme-prod:read"]}
  ]}
 ```
-
-Role and user names are only unique within an account. With more than one
-account, scope every binding, or a partner can create a role named like
-someone else's and match their binding.
 
 `ca:admin` (intermediate CSR and install), `admin:import` and `audit:read`
 are global: keep them for the operator's own staff.
 
-## Device ids and stages
-
-With `device_id_from_chip`, the device id is the partner's prefix + the
-chip's MAC in upper case (`DVTADL3C71BF4A12E0`), so a board has the same id
-in dev and prod. Every certificate then needs the MAC, and there is no
-counter. A device belongs to one environment at a time: issuing in another
-stage of the same partner is refused (`env_mismatch`) unless the request
-sets `move`, which revokes the device's certificates in the old stage
-(`cessationOfOperation`) once the new one is recorded. Moving needs
-`revoke` on the old environment.
-
-All stages of a partner must share the prefix and id scheme, and partners'
-prefixes must not overlap; the server refuses to start otherwise.
-
 ## The CLI
 
-`/v1/whoami` lists the environments the caller may use, with their partner
-and stage. `--env` takes a stage or a full name: a partner's people type
-`adl mint --env dev --mac ...` and land in their own environment; people
-who may act for several partners add `--partner <slug>` or set a default
-with `adl configure --partner <slug>`.
+`/v1/whoami` lists the environments the caller may use, with their partner,
+stage and actions (a permission without its environment: `issue`, `read`,
+...). `--stage` takes a stage: a partner's people land in their own
+environment; people who may act for several partners add `--partner <id>`
+or set a default with `adl configure --partner <id>`. `--env` is the older
+spelling of `--stage`.
 
-```bash
-adl whoami
-adl mint --env dev --port /dev/ttyUSB0             # MAC read with esptool
-adl eol provision --env prod --station line-1 --port /dev/ttyUSB0 [--move]
-adl mint --partner acme --env dev --mac 00:11:22:33:44:55   # operator staff
-adl ca csr --partner acme --env prod --cn "ACME Intermediate CA prod" --org ACME
-```
-
-## One signer per stage
-
-A dev signer and a prod signer (in different AWS accounts) work too: each
-holds only its own stage's environments. MAC-based ids can't collide across
-them, but neither knows what the other issued, so a board can hold a dev
-and a prod certificate at once, and `move` doesn't apply. Configure both
-servers and `--env` picks one:
+With a signer per stage, configure both; `--stage` also picks the server:
 
 ```bash
 adl configure --stage dev  --url https://signer.dev.autorq.com  --region us-east-1 --audience autorq-signer:dev  --profile edge-labs-dev
 adl configure --stage prod --url https://signer.prod.autorq.com --region us-east-1 --audience autorq-signer:prod --profile edge-labs-prod
-adl mint --env dev --mac 3c:71:bf:4a:12:e0
-adl show DVTADL3C71BF4A12E0 --env prod
+adl whoami --stage dev
+adl mint --stage dev --port /dev/ttyUSB0                   # MAC read with esptool
+adl eol provision --stage prod --station line-1 --port /dev/ttyUSB0
+adl show DVTADL3C71BF4A12E0 --stage prod
+adl mint --partner acme --stage dev --mac 00:11:22:33:44:55   # AutorQ staff
+adl ca csr --partner acme --stage prod --cn "ACME Intermediate CA prod"   # O=ACME by default
 ```
 
 `/healthz` no longer lists environments, so anonymous callers can't

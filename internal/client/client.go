@@ -23,8 +23,8 @@ import (
 	"github.com/edge-labs/adl-signing-server/internal/model"
 )
 
-// Config is stored in ~/.config/adl/config.json by `adl configure`.
-type Config struct {
+// Server is one signing server: where it is and how to sign in to it.
+type Server struct {
 	URL string `json:"url"`
 	// Region is the STS region tokens are signed for; it must be one the
 	// server accepts (normally the region it is deployed in).
@@ -34,29 +34,32 @@ type Config struct {
 	Profile string `json:"profile,omitempty"`
 	// Local talks to `adl-signer serve -local-insecure`.
 	Local bool `json:"local,omitempty"`
+}
+
+// Config is stored in ~/.config/adl/config.json by `adl configure`. The
+// embedded Server is the default one.
+type Config struct {
+	Server
 	// Partner is the manufacturing partner to act for by default, for
 	// people who may act for several (AutorQ staff). Partner staff never
 	// need it: their identity only reaches their own environments.
 	Partner string `json:"partner,omitempty"`
 	// Stages holds one server per stage (dev, prod), for deployments that
-	// run a signer per stage. --env picks the server; the top-level one is
-	// the fallback.
-	Stages map[string]*Config `json:"stages,omitempty"`
+	// run a signer per stage. --stage picks the server; the default one
+	// is the fallback.
+	Stages map[string]*Server `json:"stages,omitempty"`
 }
 
-// ForEnv returns the server to use for want, a stage (prod) or a full
-// environment name (edge-labs-prod).
-func (c *Config) ForEnv(want string) (*Config, error) {
+// ForStage returns the server to use for want, a stage (prod) or a full
+// environment name (edge-labs-prod). A stage server without a profile
+// uses the default one's.
+func (c *Config) ForStage(want string) (*Server, error) {
 	if want != "" {
 		for stage, s := range c.Stages {
 			if s == nil || (want != stage && !strings.HasSuffix(want, "-"+stage)) {
 				continue
 			}
 			out := *s
-			out.Stages = nil
-			if out.Partner == "" {
-				out.Partner = c.Partner
-			}
 			if out.Profile == "" {
 				out.Profile = c.Profile
 			}
@@ -70,12 +73,11 @@ func (c *Config) ForEnv(want string) (*Config, error) {
 		}
 		sort.Strings(stages)
 		if want == "" {
-			return nil, fmt.Errorf("pass --env to pick a server (configured: %s)", strings.Join(stages, ", "))
+			return nil, fmt.Errorf("pass --stage to pick a server (configured: %s)", strings.Join(stages, ", "))
 		}
 		return nil, fmt.Errorf("no server configured for %s (configured: %s); run `adl configure --stage ...`", want, strings.Join(stages, ", "))
 	}
-	out := *c
-	out.Stages = nil
+	out := c.Server
 	return &out, nil
 }
 
@@ -146,7 +148,7 @@ type Client struct {
 
 // New builds a client. In AWS mode it loads credentials the same way the
 // AWS CLI does (profile, SSO cache, env vars, instance role).
-func New(ctx context.Context, cfg *Config) (*Client, error) {
+func New(ctx context.Context, cfg *Server) (*Client, error) {
 	u, err := url.Parse(strings.TrimRight(cfg.URL, "/"))
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("bad server url %q", cfg.URL)

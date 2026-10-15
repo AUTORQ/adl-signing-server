@@ -21,37 +21,43 @@ import (
 
 const usage = `adl - device certificate tool
 
---env takes a stage (dev, prod) or a full environment name (edge-labs-dev).
-Your identity decides which partner's environments you reach; people who may
-act for several partners (AutorQ staff) pick one with --partner or set a
-default with "adl configure --partner".
+Words used here:
+  partner      a manufacturing partner, by id (edge-labs). Its name on
+               certificates (O=) is set by AutorQ.
+  stage        dev or prod. Each stage has its own signer and intermediate.
+  environment  a partner's stage on a signer (edge-labs-dev). You never need
+               to type it: your identity decides the partner, --stage the
+               stage. People who may act for several partners (AutorQ staff)
+               add --partner, or set a default with "adl configure --partner".
+  device id    the partner's prefix + the board's MAC (DVTADL3C71BF4A12E0),
+               the same in every stage. Not the certificate serial (--serial).
 
 Setup:
   adl configure [--stage dev|prod] --url URL --region REGION --audience AUD [--profile AWS_PROFILE] [--partner P]
-  adl whoami [--env dev|prod]
+  adl whoami [--stage S]
 
 Developers:
-  adl mint  [--env dev] (--mac MAC | --port PORT | --id ID) [--move] [--label k=v] [--out DIR] [--zip] [--no-escrow] [--replace]
-  adl fetch ID [--out DIR] [--serial S] [--no-key]
-  adl list  [--env dev|prod] [--partner P]
-  adl show  ID
+  adl mint  [--stage dev] (--mac MAC | --port PORT | --id ID) [--label k=v] [--out DIR] [--zip] [--no-escrow] [--replace]
+  adl fetch ID [--stage S] [--out DIR] [--serial S] [--no-key]
+  adl list  [--stage S] [--partner P]
+  adl show  ID [--stage S]
 
 End of line (factory):
-  adl eol check     [--env prod] --station NAME [--port PORT]
-  adl eol provision [--env prod] --station NAME --port PORT [--firmware VER] [--reissue] [--move] [--loop]
+  adl eol check     [--stage prod] --station NAME [--port PORT]
+  adl eol provision [--stage prod] --station NAME --port PORT [--firmware VER] [--reissue] [--loop]
 
 Admin:
-  adl revoke ID --reason REASON [--serial S]
-  adl ca status  --env ENV
-  adl ca csr     --env ENV --cn NAME [--org O] [--ou OU] [--country C] [--out FILE]
-  adl ca install --env ENV --chain FILE
-  adl ca crl     --env ENV [--out FILE]
-  adl import --env ENV --dir DIR [--with-keys] [--provisioned] [--dry-run]
-  adl audit [--day YYYY-MM-DD]
+  adl revoke ID --reason REASON [--stage S] [--serial S]
+  adl ca status  --stage S
+  adl ca csr     --stage S --cn NAME [--org O] [--ou OU] [--country C] [--out FILE]
+  adl ca install --stage S --chain FILE
+  adl ca crl     --stage S [--out FILE]
+  adl import --stage S --dir DIR [--with-keys] [--provisioned] [--dry-run]
+  adl audit [--stage S] [--day YYYY-MM-DD]
 
-Commands that take --env also take --partner. With one signer per stage,
-configure each with "adl configure --stage dev|prod ..."; --env then also
-picks the server (fetch, show, revoke and audit take --env for that too).
+Commands with --stage also take --partner. With a signer per stage,
+configure each with "adl configure --stage dev|prod ..."; --stage then also
+picks the server. --env is the older spelling of --stage and still works.
 Run "adl <command> -h" for the flags of a command.
 `
 
@@ -121,12 +127,22 @@ func defaultPartner() string {
 	return ""
 }
 
-// serverFlag adds --env to commands that only need it to pick a server.
-func serverFlag(fs *flag.FlagSet) *string {
-	return fs.String("env", "", "stage whose server to ask (dev, prod), when each stage has its own")
+// stageFlag registers --stage, and --env, its spelling from before there
+// were partners. Both take a stage (dev, prod) or a full environment name
+// (edge-labs-prod); with a partner, the CLI works out the environment.
+func stageFlag(fs *flag.FlagSet, def, usage string) *string {
+	v := new(string)
+	fs.StringVar(v, "stage", def, usage)
+	fs.StringVar(v, "env", def, "same as --stage")
+	return v
 }
 
-// resolveEnv maps --env (a stage or a full name) and --partner to the
+// serverFlag adds --stage to commands that only need it to pick a server.
+func serverFlag(fs *flag.FlagSet) *string {
+	return stageFlag(fs, "", "stage whose server to ask (dev, prod), when each stage has its own")
+}
+
+// resolveEnv maps --stage (a stage or a full name) and --partner to the
 // environment the server knows, using what the caller may access.
 func resolveEnv(ctx context.Context, c *client.Client, partner, want string) (string, error) {
 	w, err := c.WhoAmI(ctx)
@@ -143,10 +159,11 @@ func newClient(ctx context.Context, env string) (*client.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg, err = cfg.ForEnv(env); err != nil {
+	srv, err := cfg.ForStage(env)
+	if err != nil {
 		return nil, err
 	}
-	return client.New(ctx, cfg)
+	return client.New(ctx, srv)
 }
 
 // labels collects repeated --label k=v flags.

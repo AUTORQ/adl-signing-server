@@ -41,8 +41,9 @@ type EnvConfig struct {
 	// Stage is the gateway the certificates are for (dev, prod). Defaults
 	// to Name.
 	Stage string
-	// Organization is O= on device certificates; defaults to
-	// Options.Organization.
+	// Organization is the partner's name as it appears in O= on its
+	// device certificates and intermediate CSRs; Partner is its id.
+	// Required with Partner; otherwise defaults to Options.Organization.
 	Organization string
 	// DevicePrefix and DeviceIDDigits shape allocated IDs: DVTADL + 017.
 	// Environments with the same prefix share one counter, which is how
@@ -51,9 +52,8 @@ type EnvConfig struct {
 	DeviceIDDigits int
 	// DeviceIDFromChip makes device IDs DevicePrefix + the chip's MAC in
 	// upper case hex, instead of a counter. A board keeps the same ID
-	// whichever stage it is assigned to, and every certificate needs the
-	// chip's MAC. A device belongs to one environment at a time; moving
-	// it to another stage of the same partner revokes its old certificates.
+	// whichever signer or stage issues it, and every certificate needs
+	// the chip's MAC (so RequireChipID is implied).
 	DeviceIDFromChip bool
 	Validity         time.Duration
 	// AllowKeyEscrow lets clients upload the private key for safekeeping.
@@ -124,6 +124,14 @@ func New(o Options) (*Service, error) {
 			if !partnerRE.MatchString(e.Partner) || !stageRE.MatchString(e.Stage) || e.Name != e.Partner+"-"+e.Stage {
 				return nil, fmt.Errorf("service: env %s must be named <partner>-<stage> (%s-%s)", e.Name, e.Partner, e.Stage)
 			}
+			// The server-wide default would put one partner's name on
+			// another's certificates.
+			if strings.TrimSpace(e.Organization) == "" {
+				return nil, fmt.Errorf("service: env %s belongs to partner %s and needs its own organization", e.Name, e.Partner)
+			}
+		}
+		if e.DeviceIDFromChip {
+			e.RequireChipID = true
 		}
 		if _, dup := envs[e.Name]; dup {
 			return nil, fmt.Errorf("service: env %s is configured twice", e.Name)
@@ -341,7 +349,7 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 		switch {
 		case chip != "":
 			if !macRE.MatchString(chip) {
-				return nil, badRequest("chip_id %q is not a 6 byte MAC; %s device ids are made from it", req.ChipID, env.Name)
+				return nil, badRequest("chip_id %q is not the board's 6 byte MAC; %s device ids are made from it", req.ChipID, env.Name)
 			}
 			want := env.DevicePrefix + strings.ToUpper(chip)
 			if req.DeviceID != "" && req.DeviceID != want {
@@ -349,7 +357,7 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 			}
 			req.DeviceID, fromChip = want, true
 		case req.DeviceID == "" || !req.Replace:
-			return nil, badRequest("%s device ids are made from the chip MAC; chip_id is required", env.Name)
+			return nil, badRequest("%s device ids are made from the board's MAC: chip_id is required (adl --mac or --port)", env.Name)
 		}
 	}
 	if err := checkLabels(req.Labels); err != nil {
@@ -363,10 +371,6 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 	now := s.now().UTC()
 	var dev *model.Device
 	replaced := ""
-	// moved holds the active certificates of a device being moved here
-	// from another stage; they are revoked once the new one is recorded.
-	var moved []*model.Certificate
-	var movedFrom EnvConfig
 	if req.DeviceID == "" {
 		if req.Replace {
 			return nil, badRequest("replace needs a device_id")
@@ -405,24 +409,19 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 			return nil, err
 		default:
 			if dev.Env != env.Name {
-				if !req.Move {
-					return nil, conflict("env_mismatch", map[string]string{"device_id": id, "env": dev.Env},
-						"device %s is assigned to %s; pass move to assign it to %s instead (revokes its %s certificates)", id, dev.Env, env.Name, dev.Env)
-				}
-				if movedFrom, moved, err = s.prepareMove(ctx, p, dev, env); err != nil {
-					return nil, err
-				}
-			} else if fromChip && !req.Replace && dev.Status != model.DevicePending {
+				return nil, conflict("env_mismatch", map[string]string{"device_id": id, "env": dev.Env}, "device %s belongs to %s", id, dev.Env)
+			}
+			if fromChip && !req.Replace && dev.Status != model.DevicePending {
 				// Same answer as a chip claim, which is what EoL stations
 				// expect when a board comes round a second time.
 				return nil, conflict("chip_already_assigned", map[string]string{"chip_id": chip, "device_id": id},
 					"chip %s is already assigned to device %s", chip, id)
 			}
-			if moved == nil && !req.Replace && dev.Status != model.DevicePending {
+			if !req.Replace && dev.Status != model.DevicePending {
 				return nil, conflict("device_exists", map[string]string{"device_id": id, "status": string(dev.Status)},
 					"device %s already has a certificate; pass replace to re-issue (the old one gets revoked)", id)
 			}
-			if moved == nil && (dev.Status == model.DeviceProvisioned || dev.Status == model.DeviceRevoked) && !p.Can(env.Name+":revoke") {
+			if (dev.Status == model.DeviceProvisioned || dev.Status == model.DeviceRevoked) && !p.Can(env.Name+":revoke") {
 				return nil, forbidden(env.Name + ":revoke")
 			}
 			if chip != "" && dev.ChipID != "" && dev.ChipID != chip {
@@ -438,10 +437,7 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 				}
 				dev.Labels[k] = v
 			}
-			if moved == nil {
-				replaced = dev.CurrentSerial
-			}
-			dev.Env = env.Name
+			replaced = dev.CurrentSerial
 		}
 	}
 
@@ -508,50 +504,12 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 		}
 		s.refreshCRLBestEffort(ctx, env, revokedNow...)
 	}
-	if moved != nil {
-		var revokedNow []*model.Certificate
-		for _, old := range moved {
-			if err := s.revokeRecord(ctx, p, old, "cessationOfOperation", now); err != nil {
-				s.log.ErrorContext(ctx, "could not revoke certificate of moved device", "serial", old.Serial, "err", err)
-				continue
-			}
-			revokedNow = append(revokedNow, old)
-		}
-		s.refreshCRLBestEffort(ctx, movedFrom, revokedNow...)
-	}
 
 	s.audit(ctx, p, "certificate.issue", env.Name, dev.ID, serial, map[string]string{
 		"key_escrowed": strconv.FormatBool(escrowPEM != nil), "replaced": replaced, "chip_id": dev.ChipID,
-		"fingerprint": rec.FingerprintSHA256, "moved_from": movedFrom.Name,
+		"fingerprint": rec.FingerprintSHA256,
 	})
 	return &model.IssueResponse{Device: *dev, Certificate: *rec, CertificatePEM: string(certPEM), ChainPEM: string(chainPEM)}, nil
-}
-
-// prepareMove checks dev may leave its environment for to, and returns the
-// certificates to revoke once the new one is in place. Moves stay within a
-// partner: the device ID carries the partner's prefix.
-func (s *Service) prepareMove(ctx context.Context, p *auth.Principal, dev *model.Device, to EnvConfig) (EnvConfig, []*model.Certificate, error) {
-	from, ok := s.envs[dev.Env]
-	if !ok {
-		return from, nil, conflict("env_mismatch", map[string]string{"device_id": dev.ID, "env": dev.Env}, "device %s is in an environment this server no longer has (%s)", dev.ID, dev.Env)
-	}
-	if from.Partner != to.Partner {
-		return from, nil, conflict("env_mismatch", map[string]string{"device_id": dev.ID, "env": dev.Env}, "device %s belongs to another partner's %s", dev.ID, dev.Env)
-	}
-	if err := require(p, from.Name+":revoke"); err != nil {
-		return from, nil, err
-	}
-	certs, err := s.store.ListCertificates(ctx, dev.ID)
-	if err != nil {
-		return from, nil, err
-	}
-	active := []*model.Certificate{}
-	for _, c := range certs {
-		if c.Status == model.CertActive {
-			active = append(active, c)
-		}
-	}
-	return from, active, nil
 }
 
 func (s *Service) allocate(ctx context.Context, p *auth.Principal, env EnvConfig, chip string, labels map[string]string, now time.Time) (*model.Device, error) {
@@ -929,6 +887,9 @@ func (s *Service) CACSR(ctx context.Context, p *auth.Principal, envName string, 
 		return nil, err
 	}
 	subj := pkix.Name{CommonName: req.CommonName}
+	if req.Organization == "" {
+		req.Organization = s.organization(env)
+	}
 	if req.Organization != "" {
 		subj.Organization = []string{req.Organization}
 	}

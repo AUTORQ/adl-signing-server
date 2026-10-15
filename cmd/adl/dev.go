@@ -26,7 +26,7 @@ func cmdConfigure(args []string) error {
 		root = existing
 	}
 	// --stage edits that stage's server instead of the default one.
-	cfg := root
+	cfg := &root.Server
 	for i, a := range args {
 		stage, ok := strings.CutPrefix(a, "--stage=")
 		if !ok && (a == "--stage" || a == "-stage") && i+1 < len(args) {
@@ -34,10 +34,10 @@ func cmdConfigure(args []string) error {
 		}
 		if ok && stage != "" {
 			if root.Stages == nil {
-				root.Stages = map[string]*client.Config{}
+				root.Stages = map[string]*client.Server{}
 			}
 			if root.Stages[stage] == nil {
-				root.Stages[stage] = &client.Config{}
+				root.Stages[stage] = &client.Server{}
 			}
 			cfg = root.Stages[stage]
 		}
@@ -49,7 +49,7 @@ func cmdConfigure(args []string) error {
 	fs.StringVar(&cfg.Audience, "audience", cfg.Audience, "server audience string (from the Terraform outputs)")
 	fs.StringVar(&cfg.Profile, "profile", cfg.Profile, "AWS profile to use (e.g. your SSO profile)")
 	fs.BoolVar(&cfg.Local, "local", cfg.Local, "talk to a local `adl-signer serve -local-insecure`")
-	fs.StringVar(&cfg.Partner, "partner", cfg.Partner, "partner to act for by default, if you may act for several (\"\" to clear)")
+	fs.StringVar(&root.Partner, "partner", root.Partner, "partner to act for by default, if you may act for several (\"\" to clear)")
 	_ = fs.Parse(args)
 	if cfg.URL == "" {
 		return errors.New("--url is required")
@@ -95,13 +95,12 @@ func cmdWhoami(ctx context.Context, args []string) error {
 // disk, key backed up on the server.
 func cmdMint(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("mint", flag.ExitOnError)
-	env := fs.String("env", "dev", "stage (dev, prod) or full environment name")
+	env := stageFlag(fs, "dev", "stage (dev, prod)")
 	partner := fs.String("partner", defaultPartner(), "partner to act for, if you may act for several")
 	id := fs.String("id", "", "device id (default: made from the MAC, or the next free number)")
 	mac := fs.String("mac", "", "the board's MAC (e.g. 3c:71:bf:4a:12:e0); device ids are made from it")
 	port := fs.String("port", "", "read the MAC from the board on this serial port with esptool")
 	esptool := fs.String("esptool", envOr("ADL_ESPTOOL", "esptool.py"), "esptool command, with --port")
-	move := fs.Bool("move", false, "the board is in another stage: assign it here (revokes its certificates there)")
 	out := fs.String("out", "certs", "output directory")
 	keyType := fs.String("key-type", "rsa2048", "rsa2048 or ecdsa-p256")
 	noEscrow := fs.Bool("no-escrow", false, "do not back up the private key on the server")
@@ -141,7 +140,7 @@ func cmdMint(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	req := model.IssueRequest{Env: envName, DeviceID: *id, CSR: string(csr), ChipID: *mac, Labels: lbl, Replace: *replace, Move: *move}
+	req := model.IssueRequest{Env: envName, DeviceID: *id, CSR: string(csr), ChipID: *mac, Labels: lbl, Replace: *replace}
 	if !*noEscrow {
 		req.PrivateKey = string(keyPEM)
 	}
@@ -287,7 +286,7 @@ func zipDir(dst, src string) error {
 
 func cmdList(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
-	env := fs.String("env", "", "only this stage or environment")
+	env := stageFlag(fs, "", "only this stage")
 	partner := fs.String("partner", defaultPartner(), "only this partner's devices")
 	asJSON := fs.Bool("json", false, "print JSON")
 	_ = fs.Parse(args)
@@ -295,7 +294,7 @@ func cmdList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Without --env the server lists every environment you can read.
+	// Without --stage the server lists every environment you can read.
 	envs := []string{""}
 	switch {
 	case *env != "":

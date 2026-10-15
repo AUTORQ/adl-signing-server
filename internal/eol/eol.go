@@ -62,11 +62,8 @@ type Options struct {
 	// Reissue re-keys a chip that is already provisioned. Needs the
 	// <env>:revoke permission.
 	Reissue bool
-	// Move assigns a board that is in another stage of the same partner
-	// to this station's environment, revoking its certificates there.
-	Move   bool
-	Notes  string
-	Labels map[string]string
+	Notes   string
+	Labels  map[string]string
 }
 
 type Result struct {
@@ -178,7 +175,7 @@ func (s *Station) Provision(ctx context.Context, o Options) (*Result, error) {
 		return nil, err
 	}
 
-	req := model.IssueRequest{Env: s.Env, DeviceID: o.DeviceID, CSR: string(csr), ChipID: mac, Labels: o.Labels, Move: o.Move}
+	req := model.IssueRequest{Env: s.Env, DeviceID: o.DeviceID, CSR: string(csr), ChipID: mac, Labels: o.Labels}
 	resp, err := s.Client.Issue(ctx, req)
 	reissued := false
 	if ae, ok := client.IsCode(err, "chip_already_assigned"); ok {

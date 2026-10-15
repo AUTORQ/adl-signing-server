@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -48,8 +49,8 @@ func TestResolveEnv(t *testing.T) {
 	}
 }
 
-func TestConfigForEnv(t *testing.T) {
-	c := &Config{Profile: "edge-labs", Partner: "edge-labs", Stages: map[string]*Config{
+func TestConfigForStage(t *testing.T) {
+	c := &Config{Server: Server{Profile: "edge-labs"}, Stages: map[string]*Server{
 		"dev":  {URL: "https://signer.dev.autorq.com", Region: "us-east-1", Audience: "autorq-signer:dev"},
 		"prod": {URL: "https://signer.prod.autorq.com", Region: "us-east-1", Audience: "autorq-signer:prod", Profile: "edge-labs-prod"},
 	}}
@@ -57,25 +58,36 @@ func TestConfigForEnv(t *testing.T) {
 		"dev": "https://signer.dev.autorq.com", "edge-labs-dev": "https://signer.dev.autorq.com",
 		"prod": "https://signer.prod.autorq.com", "acme-prod": "https://signer.prod.autorq.com",
 	} {
-		got, err := c.ForEnv(want)
-		if err != nil || got.URL != url || got.Partner != "edge-labs" {
+		got, err := c.ForStage(want)
+		if err != nil || got.URL != url {
 			t.Errorf("%s: %+v %v", want, got, err)
 		}
 	}
-	if got, _ := c.ForEnv("dev"); got.Profile != "edge-labs" {
+	if got, _ := c.ForStage("dev"); got.Profile != "edge-labs" {
 		t.Errorf("dev inherits the default profile, got %q", got.Profile)
 	}
-	if got, _ := c.ForEnv("prod"); got.Profile != "edge-labs-prod" {
+	if got, _ := c.ForStage("prod"); got.Profile != "edge-labs-prod" {
 		t.Errorf("prod keeps its own profile, got %q", got.Profile)
 	}
-	if _, err := c.ForEnv(""); err == nil || !strings.Contains(err.Error(), "--env") {
+	if _, err := c.ForStage(""); err == nil || !strings.Contains(err.Error(), "--stage") {
 		t.Errorf("no default server: %v", err)
 	}
-	if _, err := c.ForEnv("staging"); err == nil {
+	if _, err := c.ForStage("staging"); err == nil {
 		t.Error("unknown stage without a default server")
 	}
 	c.URL = "https://signer.example"
-	if got, err := c.ForEnv("staging"); err != nil || got.URL != "https://signer.example" {
+	if got, err := c.ForStage("staging"); err != nil || got.URL != "https://signer.example" {
 		t.Errorf("falls back to the default server: %+v %v", got, err)
+	}
+}
+
+// Configs written before stages existed still load the same.
+func TestConfigFormatUnchanged(t *testing.T) {
+	var c Config
+	if err := json.Unmarshal([]byte(`{"url":"https://x","region":"us-east-1","audience":"a","profile":"p"}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.URL != "https://x" || c.Profile != "p" {
+		t.Errorf("%+v", c)
 	}
 }
