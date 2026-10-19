@@ -15,9 +15,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/auth/authtest"
-	"github.com/edge-labs/adl-signing-server/internal/store"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/auth/authtest"
+	"github.com/AUTORQ/adl-signing-server/internal/store"
 )
 
 const testARN = "arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_ADLDeveloper_abc123/jane@autorq.com"
@@ -247,7 +247,7 @@ func TestBindingsScopedToAccounts(t *testing.T) {
 		Accounts: []string{autorq, edge, acme},
 		Bindings: []auth.Binding{
 			{Accounts: []string{autorq}, Roles: []string{"AWSReservedSSO_AdministratorAccess_*"}, Permissions: []string{"*"}},
-			{Accounts: []string{edge}, Roles: []string{"*"}, Users: []string{"*"}, Permissions: []string{"edge-labs-dev:issue", "edge-labs-prod:issue"}},
+			{Accounts: []string{edge}, Roles: []string{"*"}, Users: []string{"*"}, Permissions: []string{"globex-dev:issue", "globex-prod:issue"}},
 			{Accounts: []string{acme}, Roles: []string{"*"}, Users: []string{"*"}, Permissions: []string{"acme-dev:issue"}},
 		},
 	}
@@ -256,8 +256,8 @@ func TestBindingsScopedToAccounts(t *testing.T) {
 	}
 	for arn, want := range map[string]string{
 		"arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_AdministratorAccess_abc/thibault@autorq.com": "*",
-		"arn:aws:iam::222222222222:user/john":                                                "edge-labs-dev:issue edge-labs-prod:issue",
-		"arn:aws:sts::222222222222:assumed-role/AWSReservedSSO_AdministratorAccess_abc/eddy": "edge-labs-dev:issue edge-labs-prod:issue",
+		"arn:aws:iam::222222222222:user/john":                                                "globex-dev:issue globex-prod:issue",
+		"arn:aws:sts::222222222222:assumed-role/AWSReservedSSO_AdministratorAccess_abc/eddy": "globex-dev:issue globex-prod:issue",
 		"arn:aws:iam::333333333333:user/tony":                                                "acme-dev:issue",
 		"arn:aws:iam::111111111111:user/someone":                                             "",
 	} {

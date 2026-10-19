@@ -1,6 +1,6 @@
 // Command adl is the client for the ADL signing server.
 //
-//	developers:   adl mint, adl fetch DVTADL017 (get it back after losing it)
+//	developers:   adl mint, adl fetch GLXADL017 (get it back after losing it)
 //	factory:      adl eol check, adl eol provision --port /dev/ttyUSB0
 //	CA admins:    adl ca ..., adl import, adl revoke, adl audit
 package main
@@ -15,49 +15,57 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/edge-labs/adl-signing-server/internal/client"
-	"github.com/edge-labs/adl-signing-server/internal/version"
+	"github.com/AUTORQ/adl-signing-server/internal/client"
+	"github.com/AUTORQ/adl-signing-server/internal/version"
 )
 
 const usage = `adl - device certificate tool
 
 Words used here:
-  partner      a manufacturing partner, by id (edge-labs). Its name on
-               certificates (O=) is set by AutorQ.
+  partner      a manufacturing partner, by id (globex). Its name on
+               certificates (O=) is set by whoever runs the signer.
   stage        dev or prod. Each stage has its own signer and intermediate.
-  environment  a partner's stage on a signer (edge-labs-dev). You never need
+  environment  a partner's stage on a signer (globex-dev). You never need
                to type it: your identity decides the partner, --stage the
-               stage. People who may act for several partners (AutorQ staff)
-               add --partner, or set a default with "adl configure --partner".
-  device id    the partner's prefix + the board's MAC (DVTADL3C71BF4A12E0),
-               the same in every stage. Not the certificate serial (--serial).
+               stage. People who may act for several partners (the signer's
+               operators) add --partner, or set a default with
+               "adl configure --partner".
+  device id    the prefix + the board's MAC (GLXADL3C71BF4A12E0), the same in
+               every stage, or + a number (GLXADL017), depending on how the
+               environment is set up. Not the certificate serial (--serial).
 
 Setup:
   adl configure [--stage dev|prod] --url URL --region REGION --audience AUD [--profile AWS_PROFILE] [--partner P]
+  adl configure --url http://127.0.0.1:8080 --local      (a local adl-signer)
   adl whoami [--stage S]
+  adl version
 
 Developers:
-  adl mint  [--stage dev] (--mac MAC | --port PORT | --id ID) [--label k=v] [--out DIR] [--zip] [--no-escrow] [--replace]
-  adl fetch ID [--stage S] [--out DIR] [--serial S] [--no-key]
-  adl list  [--stage S] [--partner P]
-  adl show  ID [--stage S]
+  adl mint  [--stage dev] [--mac MAC | --port PORT] [--id ID] [--label k=v] [--out DIR] [--zip]
+            [--no-escrow] [--replace] [--key-type rsa2048|ecdsa-p256]
+  adl fetch ID [--stage S] [--out DIR] [--serial S] [--no-key] [--zip]
+  adl list  [--stage S] [--partner P] [--json]
+  adl show  ID [--stage S] [--json]
 
 End of line (factory):
   adl eol check     [--stage prod] --station NAME [--port PORT]
   adl eol provision [--stage prod] --station NAME --port PORT [--firmware VER] [--reissue] [--loop]
+                    [--flash-script FILE] [--verify-script FILE] [--log FILE] [--chip esp32s3]
 
 Admin:
-  adl revoke ID --reason REASON [--stage S] [--serial S]
+  adl revoke ID --reason REASON [--stage S] [--serial S] [--yes]
   adl ca status  --stage S
   adl ca csr     --stage S --cn NAME [--org O] [--ou OU] [--country C] [--out FILE]
   adl ca install --stage S --chain FILE
   adl ca crl     --stage S [--out FILE]
   adl import --stage S --dir DIR [--with-keys] [--provisioned] [--dry-run]
-  adl audit [--stage S] [--day YYYY-MM-DD]
+  adl audit [--stage S] [--day YYYY-MM-DD] [--json]
 
 Commands with --stage also take --partner. With a signer per stage,
 configure each with "adl configure --stage dev|prod ..."; --stage then also
 picks the server. --env is the older spelling of --stage and still works.
+Station flags also read ADL_STATION, ADL_PORT, ADL_FIRMWARE_VERSION,
+ADL_FLASH_SCRIPT and ADL_VERIFY_SCRIPT.
 Run "adl <command> -h" for the flags of a command.
 `
 
@@ -129,7 +137,7 @@ func defaultPartner() string {
 
 // stageFlag registers --stage, and --env, its spelling from before there
 // were partners. Both take a stage (dev, prod) or a full environment name
-// (edge-labs-prod); with a partner, the CLI works out the environment.
+// (globex-prod); with a partner, the CLI works out the environment.
 func stageFlag(fs *flag.FlagSet, def, usage string) *string {
 	v := new(string)
 	fs.StringVar(v, "stage", def, usage)

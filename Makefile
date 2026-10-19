@@ -1,4 +1,4 @@
-MODULE  := github.com/edge-labs/adl-signing-server
+MODULE  := github.com/AUTORQ/adl-signing-server
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w -X $(MODULE)/internal/version.Version=$(VERSION) -X $(MODULE)/internal/version.Commit=$(COMMIT)

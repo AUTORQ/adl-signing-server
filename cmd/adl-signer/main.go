@@ -25,15 +25,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/edge-labs/adl-signing-server/internal/api"
-	"github.com/edge-labs/adl-signing-server/internal/archive"
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/config"
-	"github.com/edge-labs/adl-signing-server/internal/kmssigner"
-	"github.com/edge-labs/adl-signing-server/internal/lambdahttp"
-	"github.com/edge-labs/adl-signing-server/internal/service"
-	"github.com/edge-labs/adl-signing-server/internal/store"
-	"github.com/edge-labs/adl-signing-server/internal/version"
+	"github.com/AUTORQ/adl-signing-server/internal/api"
+	"github.com/AUTORQ/adl-signing-server/internal/archive"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/config"
+	"github.com/AUTORQ/adl-signing-server/internal/kmssigner"
+	"github.com/AUTORQ/adl-signing-server/internal/lambdahttp"
+	"github.com/AUTORQ/adl-signing-server/internal/service"
+	"github.com/AUTORQ/adl-signing-server/internal/store"
+	"github.com/AUTORQ/adl-signing-server/internal/version"
 )
 
 func main() {

@@ -101,7 +101,7 @@ group only allows the ALB.
   optional `adl-*` roles the caller picks their own session name, so either
   stick to Identity Center or add an `sts:RoleSessionName` /
   `sts:SourceIdentity` condition to those trust policies that fits how
-  AutorQ's people sign in. The full ARN, including the source principal, is
+  your people sign in. The full ARN, including the source principal, is
   in CloudTrail either way.
 - Station hardening. Use full-disk encryption, a dedicated OS user, and
   IAM Roles Anywhere with the station key in a TPM.

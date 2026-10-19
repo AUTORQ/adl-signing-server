@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/client"
-	"github.com/edge-labs/adl-signing-server/internal/eol"
-	"github.com/edge-labs/adl-signing-server/internal/model"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/client"
+	"github.com/AUTORQ/adl-signing-server/internal/eol"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
 )
 
 func cmdCA(ctx context.Context, args []string) error {
@@ -32,7 +32,7 @@ func cmdCA(ctx context.Context, args []string) error {
 	var cn, org, ou, country, chainFile *string
 	switch sub {
 	case "csr":
-		cn = fset.String("cn", "", "common name, e.g. \"EDGE Labs Intermediate CA prod\"")
+		cn = fset.String("cn", "", "common name, e.g. \"Globex Intermediate CA prod\"")
 		org = fset.String("org", "", "O= of the CSR (default: the environment's organization, i.e. the partner's name)")
 		ou = fset.String("ou", "IoT Devices", "organizational unit")
 		country = fset.String("country", "US", "country")
@@ -119,7 +119,7 @@ func writeOrPrint(path string, data []byte) error {
 
 var legacyCertRE = regexp.MustCompile(`^device-([A-Za-z0-9_-]+)\.crt$`)
 
-// cmdImport walks a copy of the old droplet's key directory and registers
+// cmdImport walks a directory of existing device certificates and registers
 // every device certificate in it.
 func cmdImport(ctx context.Context, args []string) error {
 	fset := flag.NewFlagSet("import", flag.ExitOnError)

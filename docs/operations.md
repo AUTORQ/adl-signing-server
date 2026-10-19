@@ -9,7 +9,7 @@ Prereqs: Terraform 1.6+, Go 1.26+, AWS credentials for the target account
 make dist                                   # dist/adl-signer-lambda.zip, dist/adl-signer-linux-arm64, dist/cli/*
 cd deploy/terraform/environments/example    # copy this dir per real environment
 cp terraform.tfvars.example terraform.tfvars
-$EDITOR versions.tf terraform.tfvars        # backend, region, deployment_mode, bindings
+$EDITOR versions.tf terraform.tfvars        # backend, region, environments, cert_organization, deployment_mode, bindings
 terraform init
 terraform plan -out plan
 terraform apply plan
@@ -17,8 +17,9 @@ terraform output cli_configure
 ```
 
 Then run the CA ceremony (docs/ca-ceremony.md) for each environment, import
-the legacy devices, and hand the `cli_configure` line to developers and the
-factory.
+any devices you certified before, and hand the `cli_configure` line to
+developers and the factory. To serve several manufacturing partners from one
+deployment, see docs/partners.md.
 
 ### Choosing a mode
 
@@ -66,9 +67,9 @@ template version and the ASG rolls the instances (50% minimum healthy).
 | task | command |
 |---|---|
 | who did what today | `adl audit` / `adl audit --day 2026-10-01` |
-| is a CA close to expiry | `adl ca status --env prod` |
-| look at a device | `adl show DVTADL031` |
-| revoke | `adl revoke DVTADL031 --reason keyCompromise` |
+| is a CA close to expiry | `adl ca status --stage prod` |
+| look at a device | `adl show GLXADL031` |
+| revoke | `adl revoke GLXADL031 --reason keyCompromise` |
 | server logs (Lambda) | CloudWatch `/aws/lambda/adl-signer`, API access logs in `/aws/apigateway/adl-signer` |
 | server logs (EC2) | CloudWatch `/adl/adl-signer`, one stream per instance |
 | shell on an instance | set `enable_ssm_session_access = true`, apply, `aws ssm start-session --target i-0123...`, then turn it off again |

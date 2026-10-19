@@ -19,8 +19,8 @@ import (
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
 )
 
 // Server is one signing server: where it is and how to sign in to it.
@@ -36,7 +36,8 @@ type Server struct {
 	Local bool `json:"local,omitempty"`
 }
 
-// Config is stored in ~/.config/adl/config.json by `adl configure`. The
+// Config is stored in <user config dir>/adl/config.json (ADL_CONFIG to
+// override) by `adl configure`. The
 // embedded Server is the default one.
 type Config struct {
 	Server
@@ -51,7 +52,7 @@ type Config struct {
 }
 
 // ForStage returns the server to use for want, a stage (prod) or a full
-// environment name (edge-labs-prod). A stage server without a profile
+// environment name (globex-prod). A stage server without a profile
 // uses the default one's.
 func (c *Config) ForStage(want string) (*Server, error) {
 	if want != "" {

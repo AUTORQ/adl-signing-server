@@ -5,8 +5,9 @@ time and a few seconds after that.
 
 ## One-time setup
 
-1. Get the `adl` binary for your machine from the latest build (`make cli`
-   output, or ask whoever runs releases) and put it on your `PATH`.
+1. Install `adl`: `go install github.com/AUTORQ/adl-signing-server/cmd/adl@latest`
+   (it lands in `$(go env GOPATH)/bin`), or take the binary for your machine
+   from `make cli` and put it on your `PATH`.
 2. Make sure you can get AWS credentials for the account the signer runs in.
    Normally that's IAM Identity Center:
    ```sh
@@ -26,8 +27,12 @@ time and a few seconds after that.
    adl whoami
    ```
 
-The config lives in `~/.config/adl/config.json`. `ADL_URL`, `ADL_REGION`,
-`ADL_AUDIENCE` and `ADL_PROFILE` override it.
+The config lives in `adl/config.json` under your user config directory
+(`~/.config` on Linux, `~/Library/Application Support` on macOS,
+`%AppData%` on Windows); `ADL_CONFIG` points it elsewhere. `ADL_URL`,
+`ADL_REGION`, `ADL_AUDIENCE`, `ADL_PROFILE` and `ADL_PARTNER` override it.
+With one signer per stage, configure each with `--stage dev|prod`
+(see [partners.md](partners.md)).
 
 ## Minting a certificate
 
@@ -35,33 +40,35 @@ The config lives in `~/.config/adl/config.json`. `ADL_URL`, `ADL_REGION`,
 adl mint
 ```
 
-You get the next free device ID and these files:
+You get the next free device ID (or, if the environment makes IDs from the
+chip, pass `--mac 3c:71:bf:4a:12:e0` or `--port /dev/ttyUSB0` to read it with
+esptool) and these files:
 
 ```
-certs/DVTADL017/device/device-DVTADL017.crt         the device certificate
-certs/DVTADL017/device/device-DVTADL017.key         its private key (0600)
-certs/DVTADL017/device/device-DVTADL017-chain.pem   cert + intermediate (same as the old bundles)
-certs/DVTADL017/device/ca-chain.pem                 intermediate + root
-certs/DVTADL017/bundle.json                         id / env / serial
+certs/GLXADL017/device/device-GLXADL017.crt         the device certificate
+certs/GLXADL017/device/device-GLXADL017.key         its private key (0600)
+certs/GLXADL017/device/device-GLXADL017-chain.pem   cert + intermediate
+certs/GLXADL017/device/ca-chain.pem                 intermediate + root
+certs/GLXADL017/bundle.json                         id / env / serial
 ```
 
-That's the same layout the old droplet zips had, so existing flashing
-scripts keep working. Useful flags:
+Useful flags:
 
 | flag | what |
 |---|---|
+| `--stage prod` | another stage (default `dev`) |
 | `--label board=rev-c` | tag the device (repeatable); shows up in `adl show` |
 | `--out DIR` | where to write (default `./certs`) |
-| `--zip` | also write `DVTADL017.zip` |
-| `--id BENCH-JIG-01` | a custom ID outside the DVTADL range (DVTADL numbers are always allocated) |
-| `--replace --id DVTADL017` | re-key an existing device. The old cert is revoked as superseded |
+| `--zip` | also write `GLXADL017.zip` |
+| `--id BENCH-JIG-01` | a custom ID outside the GLXADL range (GLXADL numbers are always allocated) |
+| `--replace --id GLXADL017` | re-key an existing device. The old cert is revoked as superseded |
 | `--no-escrow` | don't back the key up on the server |
 | `--key-type ecdsa-p256` | ECDSA instead of RSA-2048 (only if your firmware doesn't use the DS peripheral) |
 
 ## Lost it?
 
 ```sh
-adl fetch DVTADL017
+adl fetch GLXADL017
 ```
 
 This brings back the cert, chain and private key exactly as issued. It works
@@ -73,7 +80,7 @@ log. Use `--no-key` if you only need the public parts.
 
 ```sh
 adl list                 # every dev device you can see
-adl show DVTADL017       # status, labels, every cert it has had
+adl show GLXADL017       # status, labels, every cert it has had
 ```
 
 ## Things to know
@@ -85,5 +92,5 @@ adl show DVTADL017       # status, labels, every cert it has had
 - Don't commit the `certs/` directory into your firmware repo. Add it to
   that repo's `.gitignore`.
 - If a dev key leaks (pasted in Slack, pushed to GitHub), tell a CA admin.
-  They'll run `adl revoke DVTADL017 --reason keyCompromise` and you mint a
+  They'll run `adl revoke GLXADL017 --reason keyCompromise` and you mint a
   new one.

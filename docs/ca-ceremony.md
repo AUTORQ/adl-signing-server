@@ -1,22 +1,21 @@
-# CA ceremony, rotation and migrating off the droplet
+# CA ceremony, rotation and importing existing certificates
 
 ## How the hierarchy looks
 
 ```
-AutorQ Root CA            offline, held by AutorQ, never touches this system
-  |-- EDGE Labs Intermediate CA dev    private key = KMS key alias/adl-signer-ca-dev
-  |     `-- DVTADL### dev device certs
-  `-- EDGE Labs Intermediate CA prod   private key = KMS key alias/adl-signer-ca-prod
-        `-- DVTADL### prod device certs
+Root CA                          offline, held by you, never touches this system
+  |-- Globex Intermediate CA dev    private key = KMS key alias/adl-signer-ca-dev
+  |     `-- GLXADL### dev device certs
+  `-- Globex Intermediate CA prod   private key = KMS key alias/adl-signer-ca-prod
+        `-- GLXADL### prod device certs
 ```
 
 Each environment's intermediate private key is created inside KMS by
 Terraform and can't be exported. The ceremony gets the root to sign a
 certificate for that KMS key.
 
-Today the only root in use is `AutorQ Root CA dev` (RSA-4096), and both of
-the droplet's intermediates chain to it. If AutorQ creates a separate prod
-root, use it for the prod ceremony below. Nothing else changes.
+One root can sign both intermediates, or you can keep a separate prod root
+and use it for the prod ceremony below. Nothing else changes.
 
 ## First-time setup (per environment)
 
@@ -25,8 +24,8 @@ You need `ca:admin` (the `adl-ca-admin` role, or a binding with `*`).
 ### 1. Get a CSR out of KMS
 
 ```sh
-adl ca csr --env prod --cn "EDGE Labs Intermediate CA prod" \
-           --org "EDGE Labs" --ou "IoT Devices" --country US \
+adl ca csr --stage prod --cn "Globex Intermediate CA prod" \
+           --org "Globex" --ou "IoT Devices" --country US \
            --out prod-intermediate.csr
 ```
 
@@ -45,20 +44,20 @@ EOF
 
 openssl req -in prod-intermediate.csr -noout -verify -subject   # sanity check
 openssl x509 -req -in prod-intermediate.csr \
-  -CA autorq-root.pem -CAkey autorq-root.key -CAcreateserial \
+  -CA root.pem -CAkey root.key -CAcreateserial \
   -days 7300 -sha384 -extfile intermediate.ext \
   -out prod-intermediate.pem
-cat prod-intermediate.pem autorq-root.pem > prod-chain.pem
+cat prod-intermediate.pem root.pem > prod-chain.pem
 ```
 
-20 years (`-days 7300`) matches the droplet intermediates. Device certs are
-clamped so they never outlive their intermediate.
+20 years (`-days 7300`) is a common lifetime for an intermediate. Device
+certs are clamped so they never outlive their intermediate.
 
 ### 3. Install it
 
 ```sh
-adl ca install --env prod --chain prod-chain.pem
-adl ca status  --env prod
+adl ca install --stage prod --chain prod-chain.pem
+adl ca status  --stage prod
 ```
 
 The server refuses the chain unless the intermediate's public key matches
@@ -93,63 +92,47 @@ or right away if you believe a key is compromised.
    CRLs are per issuer: the server only puts certs on a CRL if that CRL's
    issuer signed them.
 
-## Migrating off the droplet
+## Importing existing certificates
 
-The droplet (`autorq-key-signing-server`) has both intermediate private keys,
-and every device key it ever generated, sitting as plain files under `/root`
-on an internet-facing host. **Treat both droplet intermediates as possibly
-compromised.** The plan:
-
-Step 1: stand this system up and run the ceremony for dev and prod (above),
-with new KMS-backed intermediates. From then on, all new certs come from
-here.
-
-Step 2: import the existing devices so they show up in the registry and the
-counter carries on from DVTADL016. Copy the directories off the droplet over
-SSH to an admin machine first, never via a third party:
+If devices already carry certificates from an earlier CA setup (openssl
+scripts, another signer), import them so they show up in the registry and,
+with a counter, so new IDs carry on after the highest one imported. Copy the
+certificate directories to an admin machine first, over SSH, never via a
+third party. `adl import` reads every `device-<ID>.crt` under `--dir`:
 
 ```sh
 # dev: certs and keys, so developers can `adl fetch` the old boards
-adl import --env dev  --dir ./droplet-copy/dev-keys/device --with-keys --dry-run
-adl import --env dev  --dir ./droplet-copy/dev-keys/device --with-keys
+adl import --stage dev  --dir ./old-ca/dev/device --with-keys --dry-run
+adl import --stage dev  --dir ./old-ca/dev/device --with-keys
 
 # prod: certificates only; prod keys are never escrowed
-adl import --env prod --dir ./droplet-copy/prod-keys/device --provisioned
+adl import --stage prod --dir ./old-ca/prod/device --provisioned
 ```
 
-Imports are idempotent (re-running skips what's already there). They record
-the legacy chain alongside each cert. The registry can't know which chip
-each legacy board is, so those devices have no chip binding.
+You need `admin:import`. Imports are idempotent (re-running skips what's
+already there, by serial) and record the legacy chain alongside each cert.
+The registry can't know which chip each legacy board is, so imported devices
+have no chip binding. If the same certificates sit in both trees, import dev
+first; the duplicates are then skipped instead of showing up as prod devices.
 
-Going by the droplet's shell history, `prod-keys/` was cloned from
-`dev-keys/`, so `prod-keys/device/` also holds DVTADL001-006. Import dev
-first. Those six are then skipped as already registered (same serials)
-instead of showing up as prod devices. Check `adl show` on a couple of
-them afterwards.
+If the old intermediate keys ever lived as files on a networked host, treat
+them as compromised:
 
-Step 3: decide with AutorQ what to do with the legacy intermediates.
-Options, strongest first:
+- Have the root holder revoke the old intermediates on the root's CRL, and
+  re-provision the legacy prod devices with `adl eol provision --reissue`
+  the next time they're in hand (`adl list --stage prod` after the import is
+  the list).
+- If the boards can't be recalled, keep trusting the old prod intermediate
+  for those serials only, and plan the re-key into the next firmware update.
 
-- Have the root holder revoke both droplet intermediates on the root's CRL,
-  and re-provision the legacy prod devices with
-  `adl eol provision --reissue` the next time they're in hand
-  (`adl list --env prod` after the import is the list). This is the
-  clean answer if anything else ever lived on that box or its SSH key was
-  shared.
-- If the boards can't be recalled, keep trusting the legacy prod
-  intermediate for those serials only, and plan the re-key into the next
-  firmware update.
-
-Step 4: destroy the droplet's key material once the copies are verified:
-shred the `prod-keys/` and `dev-keys/` trees and the zips, then destroy
-the droplet (and its snapshots/backups in DigitalOcean). Remove the root
-SSH key it accepted from anywhere else it is trusted.
+Once the copies are verified, destroy the old key material and the host's
+snapshots and backups.
 
 ## Revocation
 
 ```sh
-adl revoke DVTADL023 --reason keyCompromise          # all active certs on the device
-adl revoke DVTADL023 --reason superseded --serial 5E757B55...
+adl revoke GLXADL023 --reason keyCompromise          # all active certs on the device
+adl revoke GLXADL023 --reason superseded --serial 5E757B55...
 ```
 
 Reasons: `keyCompromise`, `superseded`, `cessationOfOperation`,

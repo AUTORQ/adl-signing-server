@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/kmssigner"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
-	"github.com/edge-labs/adl-signing-server/internal/pki/pkitest"
+	"github.com/AUTORQ/adl-signing-server/internal/kmssigner"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/pki/pkitest"
 )
 
 // The interesting part is that certificates and CRLs signed through the KMS
@@ -42,7 +42,7 @@ func TestSignerIssuesVerifiableCertificates(t *testing.T) {
 				t.Fatal(err)
 			}
 			devKey, _ := pki.GenerateKey("rsa2048")
-			if _, err := iss.IssueDevice("DVTADL001", devKey.Public(), pki.DeviceProfile{Validity: time.Hour}, time.Now()); err != nil {
+			if _, err := iss.IssueDevice("GLXADL001", devKey.Public(), pki.DeviceProfile{Validity: time.Hour}, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := pki.CreateCSR(signer, pkix.Name{CommonName: "intermediate"}); err != nil {

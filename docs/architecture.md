@@ -25,7 +25,7 @@ adl                                   adl-signer                          AWS
  |                                      claim nonce (DynamoDB, TTL)
  |                                      role -> permissions (auth policy)
  |                                      validate CSR, chip, labels
- |                                      allocate DVTADL id (atomic ADD) >  DynamoDB
+ |                                      allocate GLXADL id (atomic ADD) >  DynamoDB
  |                                      sign cert ---------------------->  KMS Sign (digest)
  |                                      verify signature locally
  |                                      archive cert/chain(/key) ------->  S3 (SSE-KMS)
@@ -65,7 +65,7 @@ request (digest), a second time (nonce), or after five minutes (timestamp).
 | `<env>:provision` | confirm EoL provisioning |
 | `<env>:revoke` | revoke, and re-key already provisioned devices |
 | `ca:admin` | CA CSR and install |
-| `admin:import` | import legacy certs, pin DVTADL ids |
+| `admin:import` | import legacy certs, pin counter ids |
 | `audit:read` | read the audit log |
 
 Recommended: bind IAM Identity Center permission sets with `auth_bindings`.
@@ -78,17 +78,20 @@ list (and, for the station role, by IAM Roles Anywhere trust anchors).
 
 ## Device identity rules
 
-- IDs with the environment's prefix (`DVTADL`) come from an atomic
-  counter. Dev and prod share it, as they did on the droplet. Only admins
-  can pin one. Imports move the counter past whatever they bring in.
+- Device IDs come in two schemes, set per environment. With a counter,
+  IDs are the prefix plus a number (`GLXADL017`) from an atomic counter
+  shared by every environment with that prefix, so dev and prod never
+  hand out the same number; only admins can pin one, and imports move the
+  counter past whatever they bring in. With `device_id_from_chip`, the ID is
+  the prefix plus the chip's MAC (`GLXADL3C71BF4A12E0`): a board gets the
+  same ID from every signer and stage, without them sharing anything.
 - Within an environment, a chip MAC is claimed by exactly one device (a
   conditional write in a DynamoDB transaction). Claims are per environment,
   so a dev cert can't squat on a production chip. Prod requires a chip ID
   on every cert.
 - Re-issuing revokes the previous cert as `superseded`. A device that's
   already `provisioned` can only be re-keyed by someone with `revoke`.
-- Device cert profile, unchanged from the droplet: `O=EDGE Labs,
-  CN=<device id>`, clientAuth, digitalSignature (+keyEncipherment for RSA),
+- Device cert profile: `O=<organization>, CN=<device id>`, clientAuth, digitalSignature (+keyEncipherment for RSA),
   10 years (clamped to the intermediate), random 127-bit serial.
 
 ## Lambda or EC2?

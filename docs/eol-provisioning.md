@@ -11,7 +11,8 @@ This is the factory step that gives a production board its identity.
    device identity.
 2. Generates an RSA-2048 key on the station, in memory.
 3. Sends only the CSR and MAC to the signer. The server allocates the
-   next device ID (DVTADL0xx), signs with the prod CA key in KMS and records
+   device ID (the next number, `GLXADL0xx`, or prefix + MAC if the
+   environment makes IDs from the chip), signs with the prod CA key in KMS and records
    the chip binding. The prod environment refuses to escrow keys and refuses
    certs without a chip ID.
 4. Writes key and certs to a private tmpfs dir (`/dev/shm/adl-eol-*`,
@@ -28,8 +29,8 @@ This is the factory step that gives a production board its identity.
 
 | situation | what to do | what happens |
 |---|---|---|
-| flash/verify script fails, cable pulled, power cut | fix it, run again on the same board | server sees the chip already has an *unconfirmed* identity and re-keys that same identity. The previous cert is revoked as superseded. Same DVTADL number |
-| board was already provisioned and comes back down the line | stop, find out why | refused with "already provisioned as DVTADL0xx" |
+| flash/verify script fails, cable pulled, power cut | fix it, run again on the same board | server sees the chip already has an *unconfirmed* identity and re-keys that same identity. The previous cert is revoked as superseded. Same device ID |
+| board was already provisioned and comes back down the line | stop, find out why | refused with "already provisioned as GLXADL0xx" |
 | re-keying a shipped or returned board on purpose | a CA admin runs with `--reissue` | needs `prod:revoke`, which stations don't have |
 | server unreachable | check network/creds, re-run | nothing was written to the board yet |
 
@@ -112,11 +113,12 @@ good:
 |---|---|
 | `ADL_PORT`, `ADL_CHIP`, `ADL_ESPTOOL` | where and how to talk to the board |
 | `ADL_DEVICE_ID`, `ADL_SERIAL`, `ADL_CHIP_MAC`, `ADL_ENV` | identity being written |
-| `ADL_DEVICE_KEY` | PEM private key (PKCS#8) |
-| `ADL_DEVICE_CERT` | device certificate |
-| `ADL_DEVICE_CHAIN` | device cert + intermediate |
-| `ADL_CA_CHAIN` | intermediate + root |
-| `ADL_CA_ROOT` | root only |
+| `ADL_KEY_ALGORITHM` | key type of the device key (RSA by default) |
+| `ADL_DEVICE_KEY` | path to the PEM private key (PKCS#8) |
+| `ADL_DEVICE_CERT` | path to the device certificate |
+| `ADL_DEVICE_CHAIN` | path to device cert + intermediate |
+| `ADL_CA_CHAIN` | path to intermediate + root |
+| `ADL_CA_ROOT` | path to the root only |
 | `ADL_WORK_DIR` | the tmpfs dir (wiped afterwards) |
 
 `--verify-script` (see `scripts/eol/verify-example.sh`) runs after the flash

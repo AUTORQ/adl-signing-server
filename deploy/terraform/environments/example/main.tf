@@ -7,6 +7,8 @@ module "core" {
   source = "../../modules/core"
 
   name                               = var.name
+  environments                       = var.environments
+  cert_organization                  = var.cert_organization
   enable_lambda                      = local.lambda
   enable_ec2                         = local.ec2
   auth_bindings                      = var.auth_bindings

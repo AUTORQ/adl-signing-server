@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/pki"
-	"github.com/edge-labs/adl-signing-server/internal/pki/pkitest"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/pki/pkitest"
 )
 
 func newIssuer(t *testing.T) (*pki.Issuer, *pkitest.Hierarchy) {
@@ -33,7 +33,7 @@ func TestIssueDeviceMatchesLegacyProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	csrPEM, err := pki.CreateCSR(key, pkix.Name{CommonName: "DVTADL099"})
+	csrPEM, err := pki.CreateCSR(key, pkix.Name{CommonName: "GLXADL099"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +42,8 @@ func TestIssueDeviceMatchesLegacyProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	cert, err := iss.IssueDevice("DVTADL099", csr.PublicKey, pki.DeviceProfile{
-		Organization: "EDGE Labs",
+	cert, err := iss.IssueDevice("GLXADL099", csr.PublicKey, pki.DeviceProfile{
+		Organization: "Globex",
 		Validity:     10 * 365 * 24 * time.Hour,
 		Backdate:     5 * time.Minute,
 	}, now)
@@ -51,7 +51,7 @@ func TestIssueDeviceMatchesLegacyProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cert.Subject.CommonName != "DVTADL099" || cert.Subject.Organization[0] != "EDGE Labs" {
+	if cert.Subject.CommonName != "GLXADL099" || cert.Subject.Organization[0] != "Globex" {
 		t.Errorf("unexpected subject %s", cert.Subject)
 	}
 	if cert.IsCA {

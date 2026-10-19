@@ -1,6 +1,15 @@
 region          = "us-east-1"
 deployment_mode = "lambda" # or "ec2" or "both"
 
+# O= on every certificate, and one entry per environment (each gets its own
+# KMS CA key). Environments sharing a device_prefix share the ID counter:
+# GLXADL001, GLXADL002, ...
+cert_organization = "Globex"
+environments = {
+  dev  = { device_prefix = "GLXADL", validity_days = 3650, allow_key_escrow = true }
+  prod = { device_prefix = "GLXADL", validity_days = 3650, allow_key_escrow = false, require_chip_id = true }
+}
+
 # Recommended: bind IAM Identity Center permission sets. The permission sets
 # need no AWS permissions of their own for this.
 # auth_bindings = [

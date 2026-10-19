@@ -1,7 +1,7 @@
 # adl-signing-server
 
-Issues and tracks the X.509 identities of ADL devices (ESP32-S3). It replaces
-the hand-run openssl scripts on the old signing droplet.
+Issues and tracks the X.509 identities of ADL devices (ESP32-S3), so that
+nobody has to run openssl by hand or keep CA keys on a server's disk.
 
 - Developers get a dev certificate with one command, and can get it back
   later if they lose it.
@@ -31,6 +31,17 @@ the hand-run openssl scripts on the old signing droplet.
              (dev, prod)    registry       certs, chains, CRLs, escrowed dev keys
 ```
 
+## Installing the CLI
+
+```sh
+go install github.com/AUTORQ/adl-signing-server/cmd/adl@latest
+```
+
+Or `make cli` for Linux, macOS and Windows binaries in `dist/cli/`.
+
+`adl help` lists every command and flag; `adl <command> -h` shows one
+command's flags and defaults.
+
 ## Quick start by role
 
 ### Developer, minting a cert for a dev board
@@ -40,8 +51,8 @@ aws sso login --profile autorq-dev     # or however you normally get AWS creds
 adl configure --url https://signer.example --region us-east-1 \
               --audience adl-signing-server:123456789012 --profile autorq-dev
 adl mint --label board=rev-c
-# -> certs/DVTADL017/device/device-DVTADL017.{crt,key}, -chain.pem, ca-chain.pem
-adl fetch DVTADL017                    # lost it? get it back
+# -> certs/GLXADL017/device/device-GLXADL017.{crt,key}, -chain.pem, ca-chain.pem
+adl fetch GLXADL017                    # lost it? get it back
 ```
 
 See [docs/developer-guide.md](docs/developer-guide.md).
@@ -59,7 +70,7 @@ warning there before running this on real boards.
 ### Setting it up the first time
 
 Deploy with [docs/operations.md](docs/operations.md), then do the CA
-ceremony and the move off the droplet in
+ceremony, and import any certificates you issued before, with
 [docs/ca-ceremony.md](docs/ca-ceremony.md).
 
 ### Background

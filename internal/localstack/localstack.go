@@ -15,15 +15,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/api"
-	"github.com/edge-labs/adl-signing-server/internal/archive"
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/kmssigner"
-	"github.com/edge-labs/adl-signing-server/internal/model"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
-	"github.com/edge-labs/adl-signing-server/internal/pki/pkitest"
-	"github.com/edge-labs/adl-signing-server/internal/service"
-	"github.com/edge-labs/adl-signing-server/internal/store"
+	"github.com/AUTORQ/adl-signing-server/internal/api"
+	"github.com/AUTORQ/adl-signing-server/internal/archive"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/kmssigner"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/pki/pkitest"
+	"github.com/AUTORQ/adl-signing-server/internal/service"
+	"github.com/AUTORQ/adl-signing-server/internal/store"
 )
 
 type Stack struct {
@@ -33,10 +33,10 @@ type Stack struct {
 	Roots   map[string]*x509.Certificate
 }
 
-// Envs mirrors the production defaults.
+// Envs mirrors deploy/terraform/environments/example/terraform.tfvars.example.
 var Envs = []service.EnvConfig{
-	{Name: "dev", DevicePrefix: "DVTADL", Validity: 3650 * 24 * time.Hour, AllowKeyEscrow: true},
-	{Name: "prod", DevicePrefix: "DVTADL", Validity: 3650 * 24 * time.Hour, RequireChipID: true},
+	{Name: "dev", DevicePrefix: "GLXADL", Validity: 3650 * 24 * time.Hour, AllowKeyEscrow: true},
+	{Name: "prod", DevicePrefix: "GLXADL", Validity: 3650 * 24 * time.Hour, RequireChipID: true},
 }
 
 // New builds the stack and runs the CA ceremony for every environment.
@@ -59,7 +59,7 @@ func New(log *slog.Logger) (*Stack, error) {
 	}
 	svc, err := service.New(service.Options{
 		Store: st.Store, Archive: st.Archive, CAs: service.NewCAs(factory, st.Archive, nil),
-		Envs: Envs, Organization: "EDGE Labs", Log: log,
+		Envs: Envs, Organization: "Globex", Log: log,
 	})
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func New(log *slog.Logger) (*Stack, error) {
 	ctx := context.Background()
 	for _, e := range Envs {
 		csrResp, err := svc.CACSR(ctx, admin, e.Name, model.CACSRRequest{
-			CommonName: "LOCAL TEST Intermediate " + e.Name, Organization: "EDGE Labs",
+			CommonName: "LOCAL TEST Intermediate " + e.Name, Organization: "Globex",
 		})
 		if err != nil {
 			return nil, err

@@ -12,18 +12,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/archive"
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/kmssigner"
-	"github.com/edge-labs/adl-signing-server/internal/model"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
-	"github.com/edge-labs/adl-signing-server/internal/pki/pkitest"
-	"github.com/edge-labs/adl-signing-server/internal/service"
-	"github.com/edge-labs/adl-signing-server/internal/store"
+	"github.com/AUTORQ/adl-signing-server/internal/archive"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/kmssigner"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/pki/pkitest"
+	"github.com/AUTORQ/adl-signing-server/internal/service"
+	"github.com/AUTORQ/adl-signing-server/internal/store"
 )
 
 var (
-	admin     = &auth.Principal{ARN: "arn:admin", Kind: "assumed-role", Role: "adl-admin", Session: "scott", Permissions: []string{"*"}}
+	admin     = &auth.Principal{ARN: "arn:admin", Kind: "assumed-role", Role: "adl-admin", Session: "alex", Permissions: []string{"*"}}
 	developer = &auth.Principal{ARN: "arn:dev", Kind: "assumed-role", Role: "dev", Session: "jane", Permissions: []string{"dev:issue", "dev:read", "dev:key-read"}}
 	station   = &auth.Principal{ARN: "arn:station", Kind: "assumed-role", Role: "adl-factory-station", Session: "line-1", Permissions: []string{"prod:issue", "prod:read", "prod:provision"}}
 	readonly  = &auth.Principal{ARN: "arn:ro", Kind: "assumed-role", Role: "ro", Session: "bob", Permissions: []string{"dev:read"}}
@@ -55,10 +55,10 @@ func newHarness(t *testing.T, install bool) *harness {
 	cas := service.NewCAs(factory, h.archive, nil)
 	h.cas = cas
 	svc, err := service.New(service.Options{
-		Store: h.store, Archive: h.archive, CAs: cas, Organization: "EDGE Labs",
+		Store: h.store, Archive: h.archive, CAs: cas, Organization: "Globex",
 		Envs: []service.EnvConfig{
-			{Name: "dev", DevicePrefix: "DVTADL", Validity: 10 * 365 * 24 * time.Hour, AllowKeyEscrow: true},
-			{Name: "prod", DevicePrefix: "DVTADL", Validity: 10 * 365 * 24 * time.Hour, RequireChipID: true},
+			{Name: "dev", DevicePrefix: "GLXADL", Validity: 10 * 365 * 24 * time.Hour, AllowKeyEscrow: true},
+			{Name: "prod", DevicePrefix: "GLXADL", Validity: 10 * 365 * 24 * time.Hour, RequireChipID: true},
 		},
 	})
 	if err != nil {
@@ -78,7 +78,7 @@ func newHarness(t *testing.T, install bool) *harness {
 func (h *harness) ceremony(t *testing.T, env string) {
 	t.Helper()
 	ctx := context.Background()
-	csrResp, err := h.svc.CACSR(ctx, admin, env, model.CACSRRequest{CommonName: "EDGE Labs Intermediate CA " + env, Organization: "EDGE Labs"})
+	csrResp, err := h.svc.CACSR(ctx, admin, env, model.CACSRRequest{CommonName: "Globex Intermediate CA " + env, Organization: "Globex"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,20 +183,20 @@ func TestDeveloperMintAndRecover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Device.ID != "DVTADL001" || resp.Device.Owner != "dev/jane" || resp.Device.Status != model.DeviceIssued {
+	if resp.Device.ID != "GLXADL001" || resp.Device.Owner != "dev/jane" || resp.Device.Status != model.DeviceIssued {
 		t.Errorf("unexpected device %+v", resp.Device)
 	}
 	leaf := h.verify(t, "dev", resp)
-	if leaf.Subject.CommonName != "DVTADL001" || leaf.Subject.Organization[0] != "EDGE Labs" {
+	if leaf.Subject.CommonName != "GLXADL001" || leaf.Subject.Organization[0] != "Globex" {
 		t.Errorf("subject %s", leaf.Subject)
 	}
-	escrowKey := archive.EscrowKey("dev", "DVTADL001", resp.Certificate.Serial)
+	escrowKey := archive.EscrowKey("dev", "GLXADL001", resp.Certificate.Serial)
 	if !h.archive.SensitiveKeys[escrowKey] {
 		t.Error("escrowed key was not written as sensitive")
 	}
 
 	// A week later the developer has lost everything.
-	b, err := h.svc.Bundle(ctx, developer, "DVTADL001", "", true)
+	b, err := h.svc.Bundle(ctx, developer, "GLXADL001", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,10 +209,10 @@ func TestDeveloperMintAndRecover(t *testing.T) {
 	}
 
 	// Read-only folks can see the cert but not the key.
-	if _, err := h.svc.Bundle(ctx, readonly, "DVTADL001", "", false); err != nil {
+	if _, err := h.svc.Bundle(ctx, readonly, "GLXADL001", "", false); err != nil {
 		t.Errorf("readonly bundle: %v", err)
 	}
-	if _, err := h.svc.Bundle(ctx, readonly, "DVTADL001", "", true); errCode(err) != "forbidden" {
+	if _, err := h.svc.Bundle(ctx, readonly, "GLXADL001", "", true); errCode(err) != "forbidden" {
 		t.Errorf("readonly got key: %v", err)
 	}
 
@@ -255,14 +255,14 @@ func TestExplicitIDBumpsSequenceAndReplace(t *testing.T) {
 	h := newHarness(t, true)
 	ctx := context.Background()
 	_, csr := csrFor(t, "")
-	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr, DeviceID: "DVTADL050"}); errCode(err) != "bad_request" {
+	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr, DeviceID: "GLXADL050"}); errCode(err) != "bad_request" {
 		t.Errorf("developer pinned a managed id: %v", err)
 	}
 	// Ids outside the managed range are fine (bench jigs and the like).
 	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr, DeviceID: "BENCH-JIG-01"}); err != nil {
 		t.Errorf("custom id: %v", err)
 	}
-	first, err := h.svc.Issue(ctx, admin, model.IssueRequest{Env: "dev", CSR: csr, DeviceID: "DVTADL050"})
+	first, err := h.svc.Issue(ctx, admin, model.IssueRequest{Env: "dev", CSR: csr, DeviceID: "GLXADL050"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,14 +271,14 @@ func TestExplicitIDBumpsSequenceAndReplace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Device.ID != "DVTADL051" {
+	if next.Device.ID != "GLXADL051" {
 		t.Errorf("allocator should skip past 050, got %s", next.Device.ID)
 	}
 
-	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr2, DeviceID: "DVTADL050"}); errCode(err) != "device_exists" {
+	if _, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr2, DeviceID: "GLXADL050"}); errCode(err) != "device_exists" {
 		t.Errorf("re-issue without replace: %v", err)
 	}
-	again, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr2, DeviceID: "DVTADL050", Replace: true})
+	again, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr2, DeviceID: "GLXADL050", Replace: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,14 +403,14 @@ func TestImportLegacy(t *testing.T) {
 	h := newHarness(t, true)
 	ctx := context.Background()
 
-	// Stand-in for the droplet's "EDGE Labs Intermediate CA".
+	// Stand-in for an intermediate that existed before the signer.
 	legacy, err := pkitest.NewHierarchy("Legacy", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	legacyIss, _ := pki.NewIssuer(legacy.IntermediateKey, legacy.Chain(), time.Now())
 	key, _ := pki.GenerateKey("rsa2048")
-	cert, err := legacyIss.IssueDevice("DVTADL016", key.Public(), pki.DeviceProfile{Organization: "EDGE Labs", Validity: time.Hour * 24 * 3650}, time.Now())
+	cert, err := legacyIss.IssueDevice("GLXADL016", key.Public(), pki.DeviceProfile{Organization: "Globex", Validity: time.Hour * 24 * 3650}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,13 +425,13 @@ func TestImportLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.Device.ID != "DVTADL016" || !detail.Certificates[0].Imported || !detail.Certificates[0].KeyEscrowed {
+	if detail.Device.ID != "GLXADL016" || !detail.Certificates[0].Imported || !detail.Certificates[0].KeyEscrowed {
 		t.Errorf("unexpected import result %+v", detail)
 	}
 	if _, err := h.svc.Import(ctx, admin, req); errCode(err) != "already_imported" {
 		t.Errorf("second import: %v", err)
 	}
-	b, err := h.svc.Bundle(ctx, developer, "DVTADL016", "", true)
+	b, err := h.svc.Bundle(ctx, developer, "GLXADL016", "", true)
 	if err != nil || b.PrivateKeyPEM == "" {
 		t.Fatalf("legacy key not recoverable: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestImportLegacy(t *testing.T) {
 	// Counter moved past the imported number.
 	_, csr := csrFor(t, "")
 	resp, err := h.svc.Issue(ctx, developer, model.IssueRequest{Env: "dev", CSR: csr})
-	if err != nil || resp.Device.ID != "DVTADL017" {
+	if err != nil || resp.Device.ID != "GLXADL017" {
 		t.Fatalf("next id after import: %+v %v", resp, err)
 	}
 
@@ -451,7 +451,7 @@ func TestImportLegacy(t *testing.T) {
 
 	// Revoking a legacy cert must not put it on our CA's CRL (it is not
 	// ours to list).
-	if _, err := h.svc.Revoke(ctx, admin, "DVTADL016", model.RevokeRequest{Reason: "superseded"}); err != nil {
+	if _, err := h.svc.Revoke(ctx, admin, "GLXADL016", model.RevokeRequest{Reason: "superseded"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range h.crl(t, "dev").RevokedCertificateEntries {
@@ -513,8 +513,8 @@ func TestCRLIncludesJustRevokedEvenWithStaleIndex(t *testing.T) {
 	}
 	// Rebuild the service over a store whose revoked index lags.
 	svc, err := service.New(service.Options{
-		Store: staleRevoked{h.store}, Archive: h.archive, CAs: h.cas, Organization: "EDGE Labs",
-		Envs: []service.EnvConfig{{Name: "dev", DevicePrefix: "DVTADL", Validity: time.Hour, AllowKeyEscrow: true}},
+		Store: staleRevoked{h.store}, Archive: h.archive, CAs: h.cas, Organization: "Globex",
+		Envs: []service.EnvConfig{{Name: "dev", DevicePrefix: "GLXADL", Validity: time.Hour, AllowKeyEscrow: true}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -551,7 +551,7 @@ func TestImportRetryAfterFailedDeviceWrite(t *testing.T) {
 	legacy, _ := pkitest.NewHierarchy("Legacy", nil)
 	iss, _ := pki.NewIssuer(legacy.IntermediateKey, legacy.Chain(), time.Now())
 	key, _ := pki.GenerateKey("rsa2048")
-	cert, _ := iss.IssueDevice("DVTADL009", key.Public(), pki.DeviceProfile{Validity: time.Hour}, time.Now())
+	cert, _ := iss.IssueDevice("GLXADL009", key.Public(), pki.DeviceProfile{Validity: time.Hour}, time.Now())
 
 	// Chip already belongs to another prod device, so the first attempt fails.
 	_, csr := csrFor(t, "")

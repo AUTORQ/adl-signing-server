@@ -14,10 +14,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/client"
-	"github.com/edge-labs/adl-signing-server/internal/eol"
-	"github.com/edge-labs/adl-signing-server/internal/model"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/client"
+	"github.com/AUTORQ/adl-signing-server/internal/eol"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
 )
 
 func cmdConfigure(args []string) error {
@@ -104,7 +104,7 @@ func cmdMint(ctx context.Context, args []string) error {
 	out := fs.String("out", "certs", "output directory")
 	keyType := fs.String("key-type", "rsa2048", "rsa2048 or ecdsa-p256")
 	noEscrow := fs.Bool("no-escrow", false, "do not back up the private key on the server")
-	zipIt := fs.Bool("zip", false, "also write <ID>.zip like the old bundles")
+	zipIt := fs.Bool("zip", false, "also write <ID>.zip")
 	replace := fs.Bool("replace", false, "re-issue an existing device id (revokes its current cert)")
 	lbl := labels{}
 	fs.Var(lbl, "label", "key=value label, repeatable (e.g. --label board=rev-c --label owner=jane)")
@@ -196,8 +196,8 @@ func cmdFetch(ctx context.Context, args []string) error {
 	return nil
 }
 
-// writeBundle lays files out like the old droplet bundles so existing
-// flashing scripts keep working:
+// writeBundle lays files out in the layout flashing scripts expect, so they
+// work unchanged:
 //
 //	<out>/<ID>/device/device-<ID>.crt        leaf
 //	<out>/<ID>/device/device-<ID>-chain.pem  leaf + intermediate
