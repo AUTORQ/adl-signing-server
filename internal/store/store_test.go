@@ -14,8 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"github.com/edge-labs/adl-signing-server/internal/model"
-	"github.com/edge-labs/adl-signing-server/internal/store"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/store"
 )
 
 func TestMemory(t *testing.T) { conformance(t, store.NewMemory()) }

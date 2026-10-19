@@ -6,7 +6,7 @@ import "time"
 type IssueRequest struct {
 	Env string `json:"env"`
 	// DeviceID is optional. When empty the server allocates the next ID
-	// from the environment's sequence (e.g. DVTADL017).
+	// from the environment's sequence (e.g. GLXADL017).
 	DeviceID string `json:"device_id,omitempty"`
 	CSR      string `json:"csr"`
 	// PrivateKey is the PEM private key to escrow. Only accepted for
@@ -93,8 +93,8 @@ type CAInstallRequest struct {
 	ChainPEM string `json:"chain_pem"`
 }
 
-// ImportRequest registers a certificate issued outside this system (the
-// legacy droplet) so it shows up in the registry and its key is escrowed.
+// ImportRequest registers a certificate issued outside this system (before
+// it existed) so it shows up in the registry and its key is escrowed.
 type ImportRequest struct {
 	Env            string `json:"env"`
 	CertificatePEM string `json:"certificate_pem"`

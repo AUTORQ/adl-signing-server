@@ -20,18 +20,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/archive"
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/model"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
-	"github.com/edge-labs/adl-signing-server/internal/store"
+	"github.com/AUTORQ/adl-signing-server/internal/archive"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/store"
 )
 
 // EnvConfig is the per environment policy (dev, prod, ...).
 //
 // A deployment shared by several manufacturing partners has one environment
-// per partner and stage, named <partner>-<stage> (edge-labs-dev,
-// edge-labs-prod), each with its own intermediate CA. Permissions are per
+// per partner and stage, named <partner>-<stage> (globex-dev,
+// globex-prod), each with its own intermediate CA. Permissions are per
 // environment, so a partner's people only ever touch their own.
 type EnvConfig struct {
 	Name string
@@ -45,7 +45,7 @@ type EnvConfig struct {
 	// device certificates and intermediate CSRs; Partner is its id.
 	// Required with Partner; otherwise defaults to Options.Organization.
 	Organization string
-	// DevicePrefix and DeviceIDDigits shape allocated IDs: DVTADL + 017.
+	// DevicePrefix and DeviceIDDigits shape allocated IDs: GLXADL + 017.
 	// Environments with the same prefix share one counter, which is how
 	// the legacy numbering worked.
 	DevicePrefix   string
@@ -129,6 +129,8 @@ func New(o Options) (*Service, error) {
 			if strings.TrimSpace(e.Organization) == "" {
 				return nil, fmt.Errorf("service: env %s belongs to partner %s and needs its own organization", e.Name, e.Partner)
 			}
+		} else if strings.TrimSpace(e.Organization) == "" && strings.TrimSpace(o.Organization) == "" {
+			return nil, fmt.Errorf("service: env %s needs an organization (ADL_CERT_ORGANIZATION)", e.Name)
 		}
 		if e.DeviceIDFromChip {
 			e.RequireChipID = true
@@ -160,7 +162,7 @@ func New(o Options) (*Service, error) {
 
 // checkPartners keeps device IDs unambiguous: one partner's stages share a
 // prefix and an ID scheme (so a board keeps its ID across stages), and no
-// two partners' prefixes overlap (DVT would otherwise read like DVTADL).
+// two partners' prefixes overlap (GLX would otherwise read like GLXADL).
 func checkPartners(envs map[string]EnvConfig) error {
 	type scheme struct {
 		prefix   string
@@ -274,7 +276,7 @@ func checkLabels(l map[string]string) error {
 	return nil
 }
 
-// sequenceNumber extracts 17 from DVTADL017 for prefix DVTADL.
+// sequenceNumber extracts 17 from GLXADL017 for prefix GLXADL.
 func sequenceNumber(prefix, id string) (int64, bool) {
 	rest, ok := strings.CutPrefix(id, prefix)
 	if !ok || rest == "" {
@@ -387,7 +389,7 @@ func (s *Service) Issue(ctx context.Context, p *auth.Principal, req model.IssueR
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			// Numbers in the managed range come from the allocator, so
-			// nobody can claim DVTADL99999 and push the counter out.
+			// nobody can claim GLXADL99999 and push the counter out.
 			if _, managed := sequenceNumber(env.DevicePrefix, id); managed && !env.DeviceIDFromChip && !p.Can("admin:import") {
 				return nil, badRequest("ids starting with %s are allocated by the server; leave device_id empty", env.DevicePrefix)
 			}
@@ -933,7 +935,7 @@ func (s *Service) CAInstall(ctx context.Context, p *auth.Principal, envName stri
 	return s.CAStatus(ctx, env.Name)
 }
 
-// Import registers a certificate made by the old droplet scripts.
+// Import registers a certificate issued before this server existed.
 func (s *Service) Import(ctx context.Context, p *auth.Principal, req model.ImportRequest) (*model.DeviceDetail, error) {
 	if err := require(p, "admin:import"); err != nil {
 		return nil, err
@@ -994,7 +996,7 @@ func (s *Service) Import(ctx context.Context, p *auth.Principal, req model.Impor
 	if isNew {
 		dev = &model.Device{ID: id, Env: env.Name, Status: model.DeviceIssued, ChipID: chip,
 			Owner: "import:" + p.Name(), CreatedAt: leaf.NotBefore.UTC(), UpdatedAt: now,
-			Labels: map[string]string{"source": "legacy-droplet"}}
+			Labels: map[string]string{"source": "legacy-import"}}
 	} else if dev.Env != env.Name {
 		return nil, conflict("env_mismatch", map[string]string{"env": dev.Env}, "device %s already registered in %s", id, dev.Env)
 	}

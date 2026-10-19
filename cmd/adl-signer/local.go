@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/localstack"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/localstack"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
 )
 
 // runLocal starts an in-memory server for trying the CLI or firmware

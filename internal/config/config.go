@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/service"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/service"
 )
 
 // Environment is one entry of ADL_ENVIRONMENTS.
@@ -64,7 +64,7 @@ func Load() (*Server, error) {
 		ArchiveBucket:  os.Getenv("ADL_ARCHIVE_BUCKET"),
 		DataKMSKeyID:   os.Getenv("ADL_DATA_KMS_KEY_ID"),
 		EscrowKMSKeyID: os.Getenv("ADL_ESCROW_KMS_KEY_ID"),
-		Organization:   getenv("ADL_CERT_ORGANIZATION", "EDGE Labs"),
+		Organization:   os.Getenv("ADL_CERT_ORGANIZATION"),
 		AuthAudience:   os.Getenv("ADL_AUTH_AUDIENCE"),
 		LogLevel:       getenv("ADL_LOG_LEVEL", "info"),
 	}

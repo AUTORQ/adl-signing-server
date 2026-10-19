@@ -21,7 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 
-	"github.com/edge-labs/adl-signing-server/internal/store"
+	"github.com/AUTORQ/adl-signing-server/internal/store"
 )
 
 const (

@@ -24,9 +24,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/client"
-	"github.com/edge-labs/adl-signing-server/internal/model"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/client"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
 )
 
 // Station holds the settings for one EoL station.

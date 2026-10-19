@@ -3,6 +3,16 @@ variable "region" {
   default = "us-east-1"
 }
 
+variable "environments" {
+  description = "Certificate environments; see modules/core for the attributes."
+  type        = any
+}
+
+variable "cert_organization" {
+  description = "O= of issued device certificates, e.g. your company name."
+  type        = string
+}
+
 variable "name" {
   type    = string
   default = "adl-signer"

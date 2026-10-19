@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/config"
+	"github.com/AUTORQ/adl-signing-server/internal/config"
 )
 
 // These are the variables the Terraform core module emits.
@@ -17,8 +17,8 @@ func setValid(t *testing.T) {
 	t.Setenv("ADL_ESCROW_KMS_KEY_ID", "arn:aws:kms:us-east-1:123456789012:key/escrow")
 	t.Setenv("ADL_AUTH_AUDIENCE", "adl-signing-server:123456789012")
 	t.Setenv("ADL_ENVIRONMENTS", `[
-		{"name":"dev","kms_key_id":"arn:dev","device_prefix":"DVTADL","device_id_digits":3,"validity_days":3650,"allow_key_escrow":true,"crl_validity_hours":168},
-		{"name":"prod","kms_key_id":"arn:prod","device_prefix":"DVTADL","device_id_digits":3,"validity_days":3650,"allow_key_escrow":false,"require_chip_id":true,"crl_validity_hours":168}
+		{"name":"dev","kms_key_id":"arn:dev","device_prefix":"GLXADL","device_id_digits":3,"validity_days":3650,"allow_key_escrow":true,"crl_validity_hours":168},
+		{"name":"prod","kms_key_id":"arn:prod","device_prefix":"GLXADL","device_id_digits":3,"validity_days":3650,"allow_key_escrow":false,"require_chip_id":true,"crl_validity_hours":168}
 	]`)
 	t.Setenv("ADL_AUTH_POLICY", `{"accounts":["123456789012"],"bindings":[{"roles":["adl-developer"],"users":[],"permissions":["dev:issue","dev:read"]}]}`)
 }
@@ -70,15 +70,15 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 func TestLoadPartners(t *testing.T) {
 	setValid(t)
 	t.Setenv("ADL_ENVIRONMENTS", `[
-		{"name":"edge-labs-dev","partner":"edge-labs","stage":"dev","organization":"EDGE Labs","kms_key_id":"arn:a","device_prefix":"DVTADL","device_id_from_chip":true,"validity_days":3650,"allow_key_escrow":true}
+		{"name":"globex-dev","partner":"globex","stage":"dev","organization":"Globex","kms_key_id":"arn:a","device_prefix":"GLXADL","device_id_from_chip":true,"validity_days":3650,"allow_key_escrow":true}
 	]`)
-	t.Setenv("ADL_AUTH_POLICY", `{"accounts":["123456789012","222222222222"],"bindings":[{"accounts":["222222222222"],"roles":["*"],"users":["*"],"permissions":["edge-labs-dev:issue"]}]}`)
+	t.Setenv("ADL_AUTH_POLICY", `{"accounts":["123456789012","222222222222"],"bindings":[{"accounts":["222222222222"],"roles":["*"],"users":["*"],"permissions":["globex-dev:issue"]}]}`)
 	c, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	e := c.ServiceEnvs()[0]
-	if e.Partner != "edge-labs" || e.Stage != "dev" || e.Organization != "EDGE Labs" || !e.DeviceIDFromChip {
+	if e.Partner != "globex" || e.Stage != "dev" || e.Organization != "Globex" || !e.DeviceIDFromChip {
 		t.Errorf("env %+v", e)
 	}
 	if b := c.AuthPolicy.Bindings[0]; len(b.Accounts) != 1 || b.Accounts[0] != "222222222222" {

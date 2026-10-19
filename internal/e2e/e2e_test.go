@@ -13,20 +13,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/auth/authtest"
-	"github.com/edge-labs/adl-signing-server/internal/client"
-	"github.com/edge-labs/adl-signing-server/internal/eol"
-	"github.com/edge-labs/adl-signing-server/internal/localstack"
-	"github.com/edge-labs/adl-signing-server/internal/model"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
-	"github.com/edge-labs/adl-signing-server/internal/store"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/auth/authtest"
+	"github.com/AUTORQ/adl-signing-server/internal/client"
+	"github.com/AUTORQ/adl-signing-server/internal/eol"
+	"github.com/AUTORQ/adl-signing-server/internal/localstack"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/store"
 )
 
 const (
-	devARN     = "arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_ADLDeveloper_0123/jane@edge-labs.us"
+	devARN     = "arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_ADLDeveloper_0123/jane@globex.us"
 	stationARN = "arn:aws:sts::111111111111:assumed-role/adl-factory-station/line-1"
-	adminARN   = "arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_ADLCAAdmin_0123/scott@edge-labs.us"
+	adminARN   = "arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_ADLCAAdmin_0123/alex@globex.example"
 )
 
 type env struct {
@@ -74,7 +74,7 @@ func TestDeveloperFlowOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if who.Principal != "AWSReservedSSO_ADLDeveloper_0123/jane@edge-labs.us" {
+	if who.Principal != "AWSReservedSSO_ADLDeveloper_0123/jane@globex.us" {
 		t.Errorf("whoami %+v", who)
 	}
 	if len(who.Environments) != 1 || who.Environments[0].Name != "dev" || strings.Join(who.Environments[0].Actions, " ") != "issue read key-read" {

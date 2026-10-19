@@ -13,11 +13,11 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 
-	"github.com/edge-labs/adl-signing-server/internal/auth"
-	"github.com/edge-labs/adl-signing-server/internal/lambdahttp"
-	"github.com/edge-labs/adl-signing-server/internal/localstack"
-	"github.com/edge-labs/adl-signing-server/internal/model"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/lambdahttp"
+	"github.com/AUTORQ/adl-signing-server/internal/localstack"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
 )
 
 func event(method, path, query, body string, b64 bool) events.APIGatewayV2HTTPRequest {

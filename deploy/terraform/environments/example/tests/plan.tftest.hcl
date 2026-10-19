@@ -72,6 +72,11 @@ mock_provider "aws" {
 }
 
 variables {
+  cert_organization = "Globex"
+  environments = {
+    dev  = { device_prefix = "GLXADL", validity_days = 3650, allow_key_escrow = true }
+    prod = { device_prefix = "GLXADL", validity_days = 3650, allow_key_escrow = false, require_chip_id = true }
+  }
   lambda_package_path = "tests/fixtures/lambda.zip"
   ec2_binary_path     = "tests/fixtures/adl-signer"
   vpc_id              = "vpc-123"

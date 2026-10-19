@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
 )
 
 // Memory is a Store kept in process memory.

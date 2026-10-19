@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/edge-labs/adl-signing-server/internal/archive"
-	"github.com/edge-labs/adl-signing-server/internal/pki"
+	"github.com/AUTORQ/adl-signing-server/internal/archive"
+	"github.com/AUTORQ/adl-signing-server/internal/pki"
 )
 
 // ErrCANotConfigured means the KMS key exists but nobody has installed the

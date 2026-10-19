@@ -1,6 +1,6 @@
 // Command adl is the client for the ADL signing server.
 //
-//	developers:   adl mint, adl fetch DVTADL017 (get it back after losing it)
+//	developers:   adl mint, adl fetch GLXADL017 (get it back after losing it)
 //	factory:      adl eol check, adl eol provision --port /dev/ttyUSB0
 //	CA admins:    adl ca ..., adl import, adl revoke, adl audit
 package main
@@ -15,21 +15,21 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/edge-labs/adl-signing-server/internal/client"
-	"github.com/edge-labs/adl-signing-server/internal/version"
+	"github.com/AUTORQ/adl-signing-server/internal/client"
+	"github.com/AUTORQ/adl-signing-server/internal/version"
 )
 
 const usage = `adl - device certificate tool
 
 Words used here:
-  partner      a manufacturing partner, by id (edge-labs). Its name on
+  partner      a manufacturing partner, by id (globex). Its name on
                certificates (O=) is set by AutorQ.
   stage        dev or prod. Each stage has its own signer and intermediate.
-  environment  a partner's stage on a signer (edge-labs-dev). You never need
+  environment  a partner's stage on a signer (globex-dev). You never need
                to type it: your identity decides the partner, --stage the
                stage. People who may act for several partners (AutorQ staff)
                add --partner, or set a default with "adl configure --partner".
-  device id    the partner's prefix + the board's MAC (DVTADL3C71BF4A12E0),
+  device id    the partner's prefix + the board's MAC (GLXADL3C71BF4A12E0),
                the same in every stage. Not the certificate serial (--serial).
 
 Setup:
@@ -129,7 +129,7 @@ func defaultPartner() string {
 
 // stageFlag registers --stage, and --env, its spelling from before there
 // were partners. Both take a stage (dev, prod) or a full environment name
-// (edge-labs-prod); with a partner, the CLI works out the environment.
+// (globex-prod); with a partner, the CLI works out the environment.
 func stageFlag(fs *flag.FlagSet, def, usage string) *string {
 	v := new(string)
 	fs.StringVar(v, "stage", def, usage)

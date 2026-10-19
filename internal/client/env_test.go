@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edge-labs/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
 )
 
 func TestResolveEnv(t *testing.T) {
 	edge := []model.EnvAccess{
-		{Name: "edge-labs-dev", Partner: "edge-labs", Stage: "dev"},
-		{Name: "edge-labs-prod", Partner: "edge-labs", Stage: "prod"},
+		{Name: "globex-dev", Partner: "globex", Stage: "dev"},
+		{Name: "globex-prod", Partner: "globex", Stage: "prod"},
 	}
 	staff := append([]model.EnvAccess{
 		{Name: "acme-dev", Partner: "acme", Stage: "dev"},
@@ -25,13 +25,13 @@ func TestResolveEnv(t *testing.T) {
 		partner, want   string
 		out, errContain string
 	}{
-		{"partner staff only name the stage", edge, "", "dev", "edge-labs-dev", ""},
-		{"full names work too", edge, "", "edge-labs-prod", "edge-labs-prod", ""},
+		{"partner staff only name the stage", edge, "", "dev", "globex-dev", ""},
+		{"full names work too", edge, "", "globex-prod", "globex-prod", ""},
 		{"someone acting for several partners must pick", staff, "", "dev", "", "--partner"},
 		{"and then gets that partner's", staff, "acme", "prod", "acme-prod", ""},
 		{"a partner you cannot act for", edge, "acme", "dev", "", "acting for acme"},
 		{"another partner's full name is refused", edge, "", "acme-dev", "", "cannot use acme-dev"},
-		{"partner and full name must agree", staff, "acme", "edge-labs-dev", "", "cannot use"},
+		{"partner and full name must agree", staff, "acme", "globex-dev", "", "cannot use"},
 		{"single tenant deployments", single, "", "prod", "prod", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,12 +50,12 @@ func TestResolveEnv(t *testing.T) {
 }
 
 func TestConfigForStage(t *testing.T) {
-	c := &Config{Server: Server{Profile: "edge-labs"}, Stages: map[string]*Server{
+	c := &Config{Server: Server{Profile: "globex"}, Stages: map[string]*Server{
 		"dev":  {URL: "https://signer.dev.autorq.com", Region: "us-east-1", Audience: "autorq-signer:dev"},
-		"prod": {URL: "https://signer.prod.autorq.com", Region: "us-east-1", Audience: "autorq-signer:prod", Profile: "edge-labs-prod"},
+		"prod": {URL: "https://signer.prod.autorq.com", Region: "us-east-1", Audience: "autorq-signer:prod", Profile: "globex-prod"},
 	}}
 	for want, url := range map[string]string{
-		"dev": "https://signer.dev.autorq.com", "edge-labs-dev": "https://signer.dev.autorq.com",
+		"dev": "https://signer.dev.autorq.com", "globex-dev": "https://signer.dev.autorq.com",
 		"prod": "https://signer.prod.autorq.com", "acme-prod": "https://signer.prod.autorq.com",
 	} {
 		got, err := c.ForStage(want)
@@ -63,10 +63,10 @@ func TestConfigForStage(t *testing.T) {
 			t.Errorf("%s: %+v %v", want, got, err)
 		}
 	}
-	if got, _ := c.ForStage("dev"); got.Profile != "edge-labs" {
+	if got, _ := c.ForStage("dev"); got.Profile != "globex" {
 		t.Errorf("dev inherits the default profile, got %q", got.Profile)
 	}
-	if got, _ := c.ForStage("prod"); got.Profile != "edge-labs-prod" {
+	if got, _ := c.ForStage("prod"); got.Profile != "globex-prod" {
 		t.Errorf("prod keeps its own profile, got %q", got.Profile)
 	}
 	if _, err := c.ForStage(""); err == nil || !strings.Contains(err.Error(), "--stage") {

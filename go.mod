@@ -1,4 +1,4 @@
-module github.com/edge-labs/adl-signing-server
+module github.com/AUTORQ/adl-signing-server
 
 go 1.26.0
 

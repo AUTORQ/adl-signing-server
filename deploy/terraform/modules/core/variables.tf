@@ -8,7 +8,7 @@ variable "environments" {
   description = <<-EOT
     Certificate environments. Each gets its own KMS CA key and its own
     intermediate certificate. Environments sharing a device_prefix share the
-    device ID counter (dev and prod both used DVTADL on the old droplet).
+    device ID counter, so a board numbered in dev keeps its number in prod.
   EOT
   type = map(object({
     device_prefix      = string
@@ -19,19 +19,6 @@ variable "environments" {
     crl_validity_hours = optional(number, 168)
     ca_key_spec        = optional(string, "RSA_4096")
   }))
-  default = {
-    dev = {
-      device_prefix    = "DVTADL"
-      validity_days    = 3650
-      allow_key_escrow = true
-    }
-    prod = {
-      device_prefix    = "DVTADL"
-      validity_days    = 3650
-      allow_key_escrow = false
-      require_chip_id  = true
-    }
-  }
 
   validation {
     condition     = alltrue([for k, v in var.environments : can(regex("^[a-z][a-z0-9-]{0,15}$", k))])
@@ -169,9 +156,13 @@ variable "backup_copy_vault_arn" {
 }
 
 variable "cert_organization" {
-  description = "O= of issued device certificates."
+  description = "O= of issued device certificates, e.g. your company name."
   type        = string
-  default     = "EDGE Labs"
+
+  validation {
+    condition     = trimspace(var.cert_organization) != ""
+    error_message = "cert_organization must not be empty."
+  }
 }
 
 variable "log_retention_days" {

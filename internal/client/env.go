@@ -5,11 +5,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/edge-labs/adl-signing-server/internal/model"
+	"github.com/AUTORQ/adl-signing-server/internal/model"
 )
 
 // ResolveEnv turns what someone typed into an environment name. want is a
-// stage (dev, prod) or a full environment name (edge-labs-dev); partner
+// stage (dev, prod) or a full environment name (globex-dev); partner
 // picks between partners for people who may act for several. access is
 // what /v1/whoami says the caller may use, so a partner's people get their
 // own environment from just "dev" without ever naming the partner.
