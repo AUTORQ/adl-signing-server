@@ -39,6 +39,9 @@ go install github.com/AUTORQ/adl-signing-server/cmd/adl@latest
 
 Or `make cli` for Linux, macOS and Windows binaries in `dist/cli/`.
 
+`adl help` lists every command and flag; `adl <command> -h` shows one
+command's flags and defaults.
+
 ## Quick start by role
 
 ### Developer, minting a cert for a dev board
