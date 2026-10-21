@@ -1,6 +1,6 @@
 // Package localstack assembles a complete signing server in memory: fake KMS
 // keys, a throwaway root per environment, in-memory registry and archive.
-// It backs `adl-signer serve -local-insecure` and the end-to-end tests.
+// It backs `adl-signer serve --local-insecure` and the end-to-end tests.
 // Nothing here is safe for real devices.
 package localstack
 

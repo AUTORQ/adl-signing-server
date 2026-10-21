@@ -2,14 +2,13 @@
 //
 //   - an AWS Lambda function behind API Gateway (detected automatically),
 //   - a long running HTTP service on EC2 (adl-signer serve),
-//   - a throwaway local instance for trying things out (adl-signer serve -local-insecure).
+//   - a throwaway local instance for trying things out (adl-signer serve --local-insecure).
 package main
 
 import (
 	"context"
 	"crypto"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net"
@@ -24,10 +23,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/spf13/cobra"
 
 	"github.com/AUTORQ/adl-signing-server/internal/api"
 	"github.com/AUTORQ/adl-signing-server/internal/archive"
 	"github.com/AUTORQ/adl-signing-server/internal/auth"
+	"github.com/AUTORQ/adl-signing-server/internal/cliinstall"
 	"github.com/AUTORQ/adl-signing-server/internal/config"
 	"github.com/AUTORQ/adl-signing-server/internal/kmssigner"
 	"github.com/AUTORQ/adl-signing-server/internal/lambdahttp"
@@ -37,34 +38,70 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := newRootCommand().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "adl-signer:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cmd := "serve"
-	args := os.Args[1:]
-	if len(args) > 0 && args[0] != "" && args[0][0] != '-' {
-		cmd, args = args[0], args[1:]
-	}
-	switch cmd {
-	case "version":
-		fmt.Println(version.String())
-		return nil
-	case "serve":
-	default:
-		return fmt.Errorf("unknown command %q (serve, version)", cmd)
+// serveOptions are the serve flags. The root command runs serve with the
+// zero value, which is what Lambda does: it starts the binary with no
+// arguments.
+type serveOptions struct {
+	localInsecure bool
+	listen        string
+}
+
+func newRootCommand() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "adl-signer",
+		Short: "The ADL signing server",
+		Long: `adl-signer is the ADL signing server. With no arguments it serves: as a Lambda
+function when AWS_LAMBDA_RUNTIME_API is set, otherwise as an HTTP service on
+$ADL_LISTEN_ADDR. Configuration comes from ADL_* environment variables; see
+docs/operations.md.`,
+		Example: `  adl-signer serve                     # EC2 / systemd
+  adl-signer serve --local-insecure    # throwaway local server, no AWS
+  adl-signer install                   # put it on PATH with completion`,
+		Version:       version.String(),
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(*cobra.Command, []string) error {
+			return runServe(serveOptions{})
+		},
 	}
 
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	local := fs.Bool("local-insecure", false, "run with in-memory storage, a throwaway CA and no real authentication (loopback only)")
-	listen := fs.String("listen", "", "listen address (default $ADL_LISTEN_ADDR or 127.0.0.1:8080)")
-	_ = fs.Parse(args)
+	var o serveOptions
+	serve := &cobra.Command{
+		Use:   "serve",
+		Short: "Run the server (Lambda is detected automatically)",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			return runServe(o)
+		},
+	}
+	serve.Flags().BoolVar(&o.localInsecure, "local-insecure", false, "run with in-memory storage, a throwaway CA and no real authentication (loopback only)")
+	serve.Flags().StringVar(&o.listen, "listen", "", "listen address (default $ADL_LISTEN_ADDR or 127.0.0.1:8080)")
+	_ = serve.RegisterFlagCompletionFunc("listen", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"127.0.0.1:8080", "0.0.0.0:8080"}, cobra.ShellCompDirectiveNoFileComp
+	})
 
-	if *local {
-		return runLocal(*listen)
+	root.AddCommand(serve, &cobra.Command{
+		Use:   "version",
+		Short: "Print the version",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintln(cmd.OutOrStdout(), version.String())
+		},
+	})
+	cliinstall.Attach(root)
+	return root
+}
+
+func runServe(o serveOptions) error {
+	if o.localInsecure {
+		return runLocal(o.listen)
 	}
 
 	cfg, err := config.Load()
@@ -84,8 +121,8 @@ func run() error {
 		return nil
 	}
 	addr := cfg.ListenAddr
-	if *listen != "" {
-		addr = *listen
+	if o.listen != "" {
+		addr = o.listen
 	}
 	return serve(addr, handler, log)
 }
@@ -166,7 +203,7 @@ func requireLoopback(addr string) error {
 	}
 	ip := net.ParseIP(host)
 	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return fmt.Errorf("-local-insecure only listens on loopback, not %q", addr)
+		return fmt.Errorf("--local-insecure only listens on loopback, not %q", addr)
 	}
 	return nil
 }

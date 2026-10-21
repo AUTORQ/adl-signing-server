@@ -35,12 +35,15 @@ nobody has to run openssl by hand or keep CA keys on a server's disk.
 
 ```sh
 go install github.com/AUTORQ/adl-signing-server/cmd/adl@latest
+adl install completion                 # tab completion for your shell
 ```
 
-Or `make cli` for Linux, macOS and Windows binaries in `dist/cli/`.
+Or take your platform's binary from `make cli` (`dist/cli/`) and let it
+install itself: `./adl-linux-amd64 install` puts it in `~/.local/bin` with
+tab completion, `sudo ./adl-linux-amd64 install system` machine-wide.
 
-`adl help` lists every command and flag; `adl <command> -h` shows one
-command's flags and defaults.
+`adl help` lists the commands, `adl <command> --help` shows a command's
+flags, defaults and examples.
 
 ## Quick start by role
 
@@ -51,8 +54,10 @@ aws sso login --profile autorq-dev     # or however you normally get AWS creds
 adl configure --url https://signer.example --region us-east-1 \
               --audience adl-signing-server:123456789012 --profile autorq-dev
 adl mint --label board=rev-c
-# -> certs/GLXADL017/device/device-GLXADL017.{crt,key}, -chain.pem, ca-chain.pem
-adl fetch GLXADL017                    # lost it? get it back
+# -> certs/GLXADL017/device/device-GLXADL017.{crt,key}, -chain.pem,
+#    ca-chain.pem, ca-root.pem
+adl fetch GLXADL017                    # lost it? cert, key and root come back
+adl ca pull --stage dev                # just the root / intermediate certs
 ```
 
 See [docs/developer-guide.md](docs/developer-guide.md).
@@ -60,6 +65,7 @@ See [docs/developer-guide.md](docs/developer-guide.md).
 ### Factory station
 
 ```sh
+adl eol --help                         # the whole station walkthrough
 adl eol check --station line-1
 adl eol provision --station line-1 --port /dev/ttyUSB0 --firmware 1.4.2 --loop
 ```
@@ -84,7 +90,7 @@ Serving several manufacturing partners from one deployment is in
 
 ```
 cmd/adl/                 CLI for developers, stations and admins
-cmd/adl-signer/          the server (Lambda, EC2, or -local-insecure)
+cmd/adl-signer/          the server (Lambda, EC2, or --local-insecure)
 internal/pki/            certificate profile, CSR checks, CRLs
 internal/kmssigner/      crypto.Signer backed by a KMS key
 internal/service/        all business rules and permission checks
