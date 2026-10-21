@@ -3,76 +3,36 @@
 //	developers:   adl mint, adl fetch GLXADL017 (get it back after losing it)
 //	factory:      adl eol check, adl eol provision --port /dev/ttyUSB0
 //	CA admins:    adl ca ..., adl import, adl revoke, adl audit
+//	everyone:     adl install (binary + shell completion)
 package main
 
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/spf13/cobra"
+
 	"github.com/AUTORQ/adl-signing-server/internal/client"
+	"github.com/AUTORQ/adl-signing-server/internal/cliinstall"
 	"github.com/AUTORQ/adl-signing-server/internal/version"
 )
 
-const usage = `adl - device certificate tool
-
-Words used here:
-  partner      a manufacturing partner, by id (globex). Its name on
-               certificates (O=) is set by whoever runs the signer.
-  stage        dev or prod. Each stage has its own signer and intermediate.
-  environment  a partner's stage on a signer (globex-dev). You never need
-               to type it: your identity decides the partner, --stage the
-               stage. People who may act for several partners (the signer's
-               operators) add --partner, or set a default with
-               "adl configure --partner".
-  device id    the prefix + the board's MAC (GLXADL3C71BF4A12E0), the same in
-               every stage, or + a number (GLXADL017), depending on how the
-               environment is set up. Not the certificate serial (--serial).
-
-Setup:
-  adl configure [--stage dev|prod] --url URL --region REGION --audience AUD [--profile AWS_PROFILE] [--partner P]
-  adl configure --url http://127.0.0.1:8080 --local      (a local adl-signer)
-  adl whoami [--stage S]
-  adl version
-
-Developers:
-  adl mint  [--stage dev] [--mac MAC | --port PORT] [--id ID] [--label k=v] [--out DIR] [--zip]
-            [--no-escrow] [--replace] [--key-type rsa2048|ecdsa-p256]
-  adl fetch ID [--stage S] [--out DIR] [--serial S] [--no-key] [--zip]
-  adl list  [--stage S] [--partner P] [--json]
-  adl show  ID [--stage S] [--json]
-
-End of line (factory):
-  adl eol check     [--stage prod] --station NAME [--port PORT]
-  adl eol provision [--stage prod] --station NAME --port PORT [--firmware VER] [--reissue] [--loop]
-                    [--flash-script FILE] [--verify-script FILE] [--log FILE] [--chip esp32s3]
-
-Admin:
-  adl revoke ID --reason REASON [--stage S] [--serial S] [--yes]
-  adl ca status  --stage S
-  adl ca csr     --stage S --cn NAME [--org O] [--ou OU] [--country C] [--out FILE]
-  adl ca install --stage S --chain FILE
-  adl ca crl     --stage S [--out FILE]
-  adl import --stage S --dir DIR [--with-keys] [--provisioned] [--dry-run]
-  adl audit [--stage S] [--day YYYY-MM-DD] [--json]
-
-Commands with --stage also take --partner. With a signer per stage,
-configure each with "adl configure --stage dev|prod ..."; --stage then also
-picks the server. --env is the older spelling of --stage and still works.
-Station flags also read ADL_STATION, ADL_PORT, ADL_FIRMWARE_VERSION,
-ADL_FLASH_SCRIPT and ADL_VERIFY_SCRIPT.
-Run "adl <command> -h" for the flags of a command.
-`
+const (
+	groupSetup   = "setup"
+	groupDev     = "dev"
+	groupFactory = "factory"
+	groupAdmin   = "admin"
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Args[1:]); err != nil {
+	if err := newRootCommand().ExecuteContext(ctx); err != nil {
 		var ae *client.APIError
 		if errors.As(err, &ae) {
 			fmt.Fprintf(os.Stderr, "error: %s\n", ae.Message)
@@ -90,40 +50,72 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string) error {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Print(usage)
-		return nil
+func newRootCommand() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "adl",
+		Short: "Device certificate tool",
+		Long: `adl - device certificate tool
+
+First time on a machine:
+  adl install                 put adl on PATH with tab completion
+  adl configure --url ...     point it at the signing server
+  adl whoami                  check who the server thinks you are
+
+Dev board:     adl mint, then flash the files it writes
+Factory line:  adl eol --help walks through the flashing station step by step
+
+Words used here:
+  partner      a manufacturing partner, by id (globex). Its name on
+               certificates (O=) is set by whoever runs the signer.
+  stage        dev or prod. Each stage has its own signer and intermediate.
+  environment  a partner's stage on a signer (globex-dev). You never need
+               to type it: your identity decides the partner, --stage the
+               stage. People who may act for several partners (the signer's
+               operators) add --partner, or set a default with
+               "adl configure --partner".
+  device id    the prefix + the board's MAC (GLXADL3C71BF4A12E0), the same in
+               every stage, or + a number (GLXADL017), depending on how the
+               environment is set up. Not the certificate serial (--serial).
+
+With a signer per stage, configure each with "adl configure --stage dev|prod";
+--stage then also picks the server. --env is the older spelling of --stage.`,
+		Version:       version.String(),
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
-	cmd, rest := args[0], args[1:]
-	switch cmd {
-	case "version":
-		fmt.Println(version.String())
-		return nil
-	case "configure":
-		return cmdConfigure(rest)
-	case "whoami":
-		return cmdWhoami(ctx, rest)
-	case "mint":
-		return cmdMint(ctx, rest)
-	case "fetch":
-		return cmdFetch(ctx, rest)
-	case "list", "ls":
-		return cmdList(ctx, rest)
-	case "show":
-		return cmdShow(ctx, rest)
-	case "revoke":
-		return cmdRevoke(ctx, rest)
-	case "eol":
-		return cmdEOL(ctx, rest)
-	case "ca":
-		return cmdCA(ctx, rest)
-	case "import":
-		return cmdImport(ctx, rest)
-	case "audit":
-		return cmdAudit(ctx, rest)
+	root.AddGroup(
+		&cobra.Group{ID: groupSetup, Title: "Setup:"},
+		&cobra.Group{ID: groupDev, Title: "Developers:"},
+		&cobra.Group{ID: groupFactory, Title: "End of line (factory flashing):"},
+		&cobra.Group{ID: groupAdmin, Title: "CA admins:"},
+	)
+
+	add := func(group string, cmds ...*cobra.Command) {
+		for _, c := range cmds {
+			c.GroupID = group
+			root.AddCommand(c)
+		}
 	}
-	return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
+	add(groupSetup, newConfigureCommand(), newWhoamiCommand(), newVersionCommand())
+	add(groupDev, newMintCommand(), newFetchCommand(), newListCommand(), newShowCommand())
+	add(groupFactory, newEOLCommand())
+	add(groupAdmin, newRevokeCommand(), newCACommand(), newImportCommand(), newAuditCommand())
+
+	install := cliinstall.Attach(root)
+	install.GroupID = groupSetup
+	root.SetCompletionCommandGroupID(groupSetup)
+	return root
+}
+
+func newVersionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintln(cmd.OutOrStdout(), version.String())
+		},
+	}
 }
 
 // defaultPartner is the partner set with `adl configure --partner` (or
@@ -138,16 +130,23 @@ func defaultPartner() string {
 // stageFlag registers --stage, and --env, its spelling from before there
 // were partners. Both take a stage (dev, prod) or a full environment name
 // (globex-prod); with a partner, the CLI works out the environment.
-func stageFlag(fs *flag.FlagSet, def, usage string) *string {
-	v := new(string)
-	fs.StringVar(v, "stage", def, usage)
-	fs.StringVar(v, "env", def, "same as --stage")
-	return v
+func stageFlag(cmd *cobra.Command, v *string, def, usage string) {
+	f := cmd.Flags()
+	f.StringVar(v, "stage", def, usage)
+	f.StringVar(v, "env", def, "same as --stage")
+	_ = f.MarkHidden("env")
+	register(cmd, map[string]completeFunc{"stage": completeStage, "env": completeStage})
 }
 
 // serverFlag adds --stage to commands that only need it to pick a server.
-func serverFlag(fs *flag.FlagSet) *string {
-	return stageFlag(fs, "", "stage whose server to ask (dev, prod), when each stage has its own")
+func serverFlag(cmd *cobra.Command, v *string) {
+	stageFlag(cmd, v, "", "stage whose server to ask (dev, prod), when each stage has its own")
+}
+
+// partnerFlag adds --partner, defaulting to the configured partner.
+func partnerFlag(cmd *cobra.Command, v *string, usage string) {
+	cmd.Flags().StringVar(v, "partner", defaultPartner(), usage)
+	register(cmd, map[string]completeFunc{"partner": completePartner})
 }
 
 // resolveEnv maps --stage (a stage or a full name) and --partner to the
@@ -179,6 +178,8 @@ type labels map[string]string
 
 func (l labels) String() string { return "" }
 
+func (l labels) Type() string { return "key=value" }
+
 func (l labels) Set(v string) error {
 	k, val, ok := strings.Cut(v, "=")
 	if !ok || k == "" {
@@ -186,31 +187,4 @@ func (l labels) Set(v string) error {
 	}
 	l[k] = val
 	return nil
-}
-
-// splitArgs separates flags from positional args so "adl fetch ID --out x"
-// works as well as "adl fetch --out x ID".
-func splitArgs(args []string, boolFlags ...string) (flags, positional []string) {
-	isBool := map[string]bool{}
-	for _, b := range boolFlags {
-		isBool[b] = true
-	}
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if a == "--" {
-			positional = append(positional, args[i+1:]...)
-			break
-		}
-		if strings.HasPrefix(a, "-") && len(a) > 1 {
-			flags = append(flags, a)
-			name := strings.TrimLeft(a, "-")
-			if !strings.Contains(name, "=") && !isBool[name] && i+1 < len(args) {
-				flags = append(flags, args[i+1])
-				i++
-			}
-			continue
-		}
-		positional = append(positional, a)
-	}
-	return flags, positional
 }

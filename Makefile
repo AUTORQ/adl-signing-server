@@ -67,7 +67,7 @@ check: lint test tf-check
 
 ## local: run the whole server in memory on 127.0.0.1:8080
 local: build
-	./bin/adl-signer serve -local-insecure
+	./bin/adl-signer serve --local-insecure
 
 clean:
 	rm -rf bin dist

@@ -75,7 +75,8 @@ fails with `ca_not_configured`.
   registration or an mTLS trust store) needs the new intermediates, or
   just the root if it trusts by root.
 - The CRL for each environment is public at `GET /v1/ca/<env>/crl` (DER),
-  and the chain at `GET /v1/ca/<env>/chain.pem`.
+  and the chain at `GET /v1/ca/<env>/chain.pem`. `adl ca pull --stage prod`
+  writes the root, intermediate and chain as separate files.
 
 ## Rotating an intermediate
 

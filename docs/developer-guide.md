@@ -5,9 +5,18 @@ time and a few seconds after that.
 
 ## One-time setup
 
-1. Install `adl`: `go install github.com/AUTORQ/adl-signing-server/cmd/adl@latest`
-   (it lands in `$(go env GOPATH)/bin`), or take the binary for your machine
-   from `make cli` and put it on your `PATH`.
+1. Install `adl` and its tab completion:
+   ```sh
+   go install github.com/AUTORQ/adl-signing-server/cmd/adl@latest   # lands in $(go env GOPATH)/bin
+   adl install completion
+   ```
+   Or take the binary for your machine from `make cli` and let it install
+   itself: `./adl-linux-amd64 install` (`~/.local/bin/adl` plus completion),
+   or `sudo ./adl-linux-amd64 install system` machine-wide. Use
+   `adl install cli local|system` or `adl install completion local|system`
+   for just one half, and `--shell zsh` if `$SHELL` guesses wrong. Open a
+   new shell afterwards and tab completion works for commands, flags,
+   stages, partners, device IDs and serials.
 2. Make sure you can get AWS credentials for the account the signer runs in.
    Normally that's IAM Identity Center:
    ```sh
@@ -49,6 +58,7 @@ certs/GLXADL017/device/device-GLXADL017.crt         the device certificate
 certs/GLXADL017/device/device-GLXADL017.key         its private key (0600)
 certs/GLXADL017/device/device-GLXADL017-chain.pem   cert + intermediate
 certs/GLXADL017/device/ca-chain.pem                 intermediate + root
+certs/GLXADL017/device/ca-root.pem                  root CA on its own
 certs/GLXADL017/bundle.json                         id / env / serial
 ```
 
@@ -71,10 +81,20 @@ Useful flags:
 adl fetch GLXADL017
 ```
 
-This brings back the cert, chain and private key exactly as issued. It works
-because dev keys are escrowed (encrypted with a dedicated KMS key, readable
-only by the service). Every fetch that includes a key is written to the audit
+This brings back the cert, chain, root CA and private key exactly as
+issued. It works because dev keys are escrowed (encrypted with a dedicated
+KMS key, readable only by the service). Every fetch that includes a key is written to the audit
 log. Use `--no-key` if you only need the public parts.
+
+If you only need the CA certificates (for a firmware build or a trust
+store), you don't need a device at all:
+
+```sh
+adl ca pull --stage dev                # <env>-root.pem, <env>-intermediate.pem, <env>-ca-chain.pem
+```
+
+The CA private keys live in KMS and can't be downloaded by anyone. That's
+on purpose.
 
 ## Looking around
 

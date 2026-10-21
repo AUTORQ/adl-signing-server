@@ -32,7 +32,7 @@ type Server struct {
 	Audience string `json:"audience"`
 	// Profile is the AWS profile to take credentials from (SSO etc).
 	Profile string `json:"profile,omitempty"`
-	// Local talks to `adl-signer serve -local-insecure`.
+	// Local talks to `adl-signer serve --local-insecure`.
 	Local bool `json:"local,omitempty"`
 }
 

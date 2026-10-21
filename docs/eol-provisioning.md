@@ -36,6 +36,10 @@ This is the factory step that gives a production board its identity.
 
 ## Station setup
 
+`adl eol --help` prints this whole page in short form (setup, a shift, what
+happens per board, what to do on FAIL), and `adl eol provision --help` has
+every flag plus the flash script contract. Point operators there first.
+
 ### Hardware/software
 
 - Linux PC (any distro with `/dev/shm`) with USB to the fixture.
@@ -44,7 +48,15 @@ This is the factory step that gives a production board its identity.
   pip install esptool==<ver> esp-secure-cert-tool==<ver>
   ```
 - `adl` binary plus `flash-esp32s3.sh` (and your verify script) from
-  `make cli`. Keep them side by side, or set `ADL_FLASH_SCRIPT`.
+  `make cli`. Install them like this:
+  ```sh
+  ./adl-linux-amd64 install                # ~/.local/bin/adl + completion
+  mkdir -p ~/.local/share/adl
+  cp flash-esp32s3.sh ~/.local/share/adl/  # where adl looks for it
+  ```
+  For a shared station login use `sudo ./adl-linux-amd64 install system`
+  and put the script in `/usr/local/share/adl/`. Or set `ADL_FLASH_SCRIPT`
+  to wherever the script lives.
 
 ### Credentials
 
