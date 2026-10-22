@@ -1,6 +1,11 @@
 # End-of-line provisioning (ESP32-S3)
 
-This is the factory step that gives a production board its identity.
+This is the factory step that gives a production board its identity. The
+identity goes into the board's `adl_certs` NVS partition, the same place
+`adl flash` puts it on a dev board. No eFuses are burned.
+
+Boards must already run firmware whose partition table has `adl_certs`
+(see [firmware-nvs.md](firmware-nvs.md)).
 
 ## What happens per board
 
@@ -15,10 +20,11 @@ This is the factory step that gives a production board its identity.
    environment makes IDs from the chip), signs with the prod CA key in KMS and records
    the chip binding. The prod environment refuses to escrow keys and refuses
    certs without a chip ID.
-4. Writes key and certs to a private tmpfs dir (`/dev/shm/adl-eol-*`,
-   mode 0700) and runs the flash script, then the optional verify
-   script.
-5. Wipes the tmpfs dir. The key now exists only on the chip.
+4. Writes key and certs to a private tmpfs dir (`/dev/shm/adl-flash-*`,
+   mode 0700). Reads the partition table off the board, builds an NVS image
+   for `adl_certs` with Espressif's `nvs_partition_gen` and writes it with
+   esptool. Then runs the optional verify script.
+5. Wipes the tmpfs dir. The key now exists only on the board.
 6. Confirms back to the server with the serial it flashed. The device
    moves from `issued` to `provisioned`, stamped with station, firmware
    version and time.
@@ -29,9 +35,10 @@ This is the factory step that gives a production board its identity.
 
 | situation | what to do | what happens |
 |---|---|---|
-| flash/verify script fails, cable pulled, power cut | fix it, run again on the same board | server sees the chip already has an *unconfirmed* identity and re-keys that same identity. The previous cert is revoked as superseded. Same device ID |
+| flash/verify fails, cable pulled, power cut | fix it, run again on the same board | server sees the chip already has an *unconfirmed* identity and re-keys that same identity. The previous cert is revoked as superseded. Same device ID |
 | board was already provisioned and comes back down the line | stop, find out why | refused with "already provisioned as GLXADL0xx" |
 | re-keying a shipped or returned board on purpose | a CA admin runs with `--reissue` | needs `prod:revoke`, which stations don't have |
+| "has no adl_certs partition" | flash firmware with the current partition table, re-run | nothing was written; the board keeps its unconfirmed identity for the re-run |
 | server unreachable | check network/creds, re-run | nothing was written to the board yet |
 
 ## Station setup
@@ -43,20 +50,19 @@ every flag plus the flash script contract. Point operators there first.
 ### Hardware/software
 
 - Linux PC (any distro with `/dev/shm`) with USB to the fixture.
-- Python + `esptool` and `esp-secure-cert-tool`, pinned to tested versions:
+- Python with Espressif's `esptool` and `esp-idf-nvs-partition-gen`,
+  pinned to tested versions:
   ```sh
-  pip install esptool==<ver> esp-secure-cert-tool==<ver>
+  pip install esptool==<ver> esp-idf-nvs-partition-gen==<ver>
   ```
-- `adl` binary plus `flash-esp32s3.sh` (and your verify script) from
-  `make cli`. Install them like this:
+  A machine with ESP-IDF installed already has both in the IDF Python
+  environment. Point adl at it with
+  `export ADL_NVS_GEN="$IDF_PYTHON_ENV_PATH/bin/python -m esp_idf_nvs_partition_gen"`.
+- The `adl` binary from `make cli`:
   ```sh
   ./adl-linux-amd64 install                # ~/.local/bin/adl + completion
-  mkdir -p ~/.local/share/adl
-  cp flash-esp32s3.sh ~/.local/share/adl/  # where adl looks for it
   ```
-  For a shared station login use `sudo ./adl-linux-amd64 install system`
-  and put the script in `/usr/local/share/adl/`. Or set `ADL_FLASH_SCRIPT`
-  to wherever the script lives.
+  For a shared station login use `sudo ./adl-linux-amd64 install system`.
 
 ### Credentials
 
@@ -85,7 +91,7 @@ adl eol check
 ```
 
 `adl eol check` confirms the identity, permissions, that the prod CA is
-installed, and that esptool and the flash script are present.
+installed, and that esptool and the NVS generator run.
 
 ### Running a shift
 
@@ -95,31 +101,24 @@ adl eol provision --port /dev/ttyUSB0 --firmware 1.4.2 --loop
 
 `--loop` waits for Enter between boards.
 
-## The flash script
+## What gets written
 
-`scripts/eol/flash-esp32s3.sh` is the default. It uses Espressif's
-`configure_esp_secure_cert.py` to:
+Namespace `adl` in the `adl_certs` partition: `device_id`, `device_cert`,
+`device_chain`, `device_key` and `ca_root`, all PEM strings. The details,
+the partition table line and the C code that reads them are in
+[firmware-nvs.md](firmware-nvs.md). `--nvs-template` changes the layout and
+`--nvs-partition` the target partition. adl will never write `nvs_cc`
+(cc_comm's own partition), and only writes partitions that are data/nvs in
+the table it reads off the board.
 
-- encrypt the device private key for the S3's Digital Signature (DS)
-  peripheral with an HMAC key it burns into an eFuse block, and
-- write the cert, CA and encrypted key into the `esp_secure_cert` partition.
+The key is plaintext in that partition. See "Protecting the key" in
+firmware-nvs.md for what flash and NVS encryption would change.
 
-With DS the plaintext key never lands in flash. Firmware can only *use* it
-through the peripheral (the `esp_secure_cert_mgr` component), so a
-flash dump doesn't leak it. The S3 DS peripheral only does RSA, which is why
-device keys are RSA-2048. That also matches every cert issued so far.
+### Custom flash scripts and the eFuse option
 
-> **eFuse burns are permanent.** Validate the whole line flow on scrap
-> boards first. Check the script's flags against
-> `configure_esp_secure_cert.py --help` for the version you pinned, since
-> they have changed between releases. The firmware has to be built with
-> `esp_secure_cert_mgr` and the matching partition table, or it won't find
-> the credentials.
-
-If the firmware reads credentials some other way (NVS, a raw partition,
-flash-encrypted SPIFFS), replace the script. The contract is simple: the
-script gets these environment variables and must exit 0 only if the board is
-good:
+`--flash-script` (or `ADL_FLASH_SCRIPT`) replaces the NVS step with your own
+script. It gets these environment variables and must exit 0 only if the
+board is good:
 
 | variable | contents |
 |---|---|
@@ -133,6 +132,15 @@ good:
 | `ADL_CA_ROOT` | path to the root only |
 | `ADL_WORK_DIR` | the tmpfs dir (wiped afterwards) |
 
+`scripts/eol/flash-esp-secure-cert-ds.sh` is one such script, kept for
+firmware that wants the ESP32-S3 Digital Signature peripheral. It burns an
+HMAC key into an eFuse block so the plaintext key never sits in flash.
+That's permanent, so the script refuses to run unless `ADL_BURN_EFUSE=yes`
+and `ADL_SECURE_CERT_OFFSET` are set. It uses Espressif's
+`configure_esp_secure_cert.py`, which Espressif documents as a development
+tool, and the ADL firmware doesn't use `esp_secure_cert_mgr` today. Treat it
+as a reference, not the production path.
+
 `--verify-script` (see `scripts/eol/verify-example.sh`) runs after the flash
 with the same variables. The best verify is "board boots and completes a TLS
 handshake to the cloud with its new cert".
@@ -143,7 +151,8 @@ These aren't done by the signer, but a production line should have them:
 
 - Secure Boot v2 enabled and the key digest burned, so only signed
   firmware runs.
-- Flash encryption in release mode.
+- Flash encryption in release mode, with NVS encryption for `adl_certs`
+  (needs a matching change to the flash step; see firmware-nvs.md).
 - JTAG and the UART download mode locked down after provisioning
   (`DIS_PAD_JTAG`, `DIS_DOWNLOAD_MODE` / secure download mode), as the
   product allows.

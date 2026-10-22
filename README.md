@@ -17,8 +17,8 @@ nobody has to run openssl by hand or keep CA keys on a server's disk.
 
 ```
  developer laptop          factory station                  CA admin
-   adl mint                adl eol provision                adl ca / revoke / audit
-      |                          |  esptool + flash script        |
+   adl mint / flash        adl eol provision                adl ca / revoke / audit
+      |                          |  esptool + NVS image           |
       +------------+-------------+--------------------------------+
                    |  HTTPS, caller proves its AWS IAM identity (SigV4-signed STS token)
           +--------v---------+        +--------------------------+
@@ -53,14 +53,16 @@ flags, defaults and examples.
 aws sso login --profile autorq-dev     # or however you normally get AWS creds
 adl configure --url https://signer.example --region us-east-1 \
               --audience adl-signing-server:123456789012 --profile autorq-dev
-adl mint --label board=rev-c
+adl mint --label board=rev-c --port /dev/ttyUSB0   # mint and flash
 # -> certs/GLXADL017/device/device-GLXADL017.{crt,key}, -chain.pem,
 #    ca-chain.pem, ca-root.pem
 adl fetch GLXADL017                    # lost it? cert, key and root come back
 adl ca pull --stage dev                # just the root / intermediate certs
 ```
 
-See [docs/developer-guide.md](docs/developer-guide.md).
+See [docs/developer-guide.md](docs/developer-guide.md). The firmware reads
+the identity from an `adl_certs` NVS partition; see
+[docs/firmware-nvs.md](docs/firmware-nvs.md).
 
 ### Factory station
 
@@ -70,8 +72,8 @@ adl eol check --station line-1
 adl eol provision --station line-1 --port /dev/ttyUSB0 --firmware 1.4.2 --loop
 ```
 
-See [docs/eol-provisioning.md](docs/eol-provisioning.md). Read the eFuse
-warning there before running this on real boards.
+See [docs/eol-provisioning.md](docs/eol-provisioning.md). The default flow
+writes NVS and burns no eFuses. Try it on a few boards before a real run.
 
 ### Setting it up the first time
 

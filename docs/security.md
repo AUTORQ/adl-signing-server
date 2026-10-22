@@ -40,8 +40,10 @@
 - Prod keys are generated on the station, held in memory and a tmpfs dir
   for the few seconds of the flash, then wiped. The server rejects any
   attempt to escrow a prod key.
-- With the DS peripheral flow, the key on the chip is encrypted under an
-  eFuse HMAC key and is only usable through the peripheral.
+- On the board the key sits in the `adl_certs` NVS partition in plaintext,
+  like the old bundles. Flash plus NVS encryption is what protects it from
+  someone with USB access; see docs/firmware-nvs.md. The optional DS
+  peripheral script (burns an eFuse) keeps the key encrypted instead.
 - Dev keys are generated on the developer's machine and, by default,
   escrowed.
 

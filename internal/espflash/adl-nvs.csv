@@ -1,0 +1,7 @@
+key,type,encoding,value
+adl,namespace,,
+device_id,data,string,${ADL_DEVICE_ID}
+device_cert,file,string,${ADL_DEVICE_CERT}
+device_chain,file,string,${ADL_DEVICE_CHAIN}
+device_key,file,string,${ADL_DEVICE_KEY}
+ca_root,file,string,${ADL_CA_ROOT}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"io"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/AUTORQ/adl-signing-server/internal/auth"
 	"github.com/AUTORQ/adl-signing-server/internal/client"
+	"github.com/AUTORQ/adl-signing-server/internal/espflash/espflashtest"
 	"github.com/AUTORQ/adl-signing-server/internal/localstack"
 	"github.com/AUTORQ/adl-signing-server/internal/pki"
 )
@@ -70,14 +72,20 @@ func TestHelpForFlashing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"ONE-TIME STATION SETUP", "EVERY SHIFT", "WHEN A BOARD FAILS", "adl eol check", "ADL_STATION"} {
+	for _, want := range []string{"ONE-TIME STATION SETUP", "EVERY SHIFT", "WHEN A BOARD FAILS", "adl eol check", "ADL_STATION", "Nothing burns eFuses"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("adl eol --help is missing %q", want)
 		}
 	}
 	out, _ = runAdl(t, "eol", "provision", "--help")
-	if !strings.Contains(out, "FLASH SCRIPT CONTRACT") || !strings.Contains(out, "ADL_CA_ROOT") {
-		t.Errorf("provision help lacks the script contract:\n%s", out)
+	for _, want := range []string{"NVS LAYOUT", "device_key", "CUSTOM FLASH SCRIPT", "ADL_CA_ROOT", "ADL_BURN_EFUSE=yes"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("adl eol provision --help is missing %q", want)
+		}
+	}
+	out, _ = runAdl(t, "flash", "--help")
+	if !strings.Contains(out, "Nothing here burns eFuses") || !strings.Contains(out, "docs/firmware-nvs.md") {
+		t.Errorf("flash help:\n%s", out)
 	}
 }
 
@@ -176,23 +184,30 @@ func mustRoot(t *testing.T, path string) *x509.Certificate {
 	return certs[0]
 }
 
-// --env, the spelling from before partners, still works wherever --stage
-// does, including where a stage is required.
-func TestEnvIsStillAccepted(t *testing.T) {
+// localServer starts the in-memory signer and points adl at it.
+func localServer(t *testing.T) *localstack.Stack {
+	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	st, err := localstack.New(log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(st.Handler(&auth.Local{Permissions: []string{"*"}}, log))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	t.Setenv("ADL_CONFIG", filepath.Join(t.TempDir(), "config.json"))
-	for _, k := range []string{"ADL_URL", "ADL_REGION", "ADL_AUDIENCE", "ADL_PROFILE", "ADL_PARTNER"} {
+	for _, k := range []string{"ADL_URL", "ADL_REGION", "ADL_AUDIENCE", "ADL_PROFILE", "ADL_PARTNER", "ADL_PORT", "ADL_NVS_TEMPLATE", "ADL_NVS_PARTITION"} {
 		t.Setenv(k, "")
 	}
 	if out, err := runAdl(t, "configure", "--url", srv.URL, "--local"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
+	return st
+}
+
+// --env, the spelling from before partners, still works wherever --stage
+// does, including where a stage is required.
+func TestEnvIsStillAccepted(t *testing.T) {
+	localServer(t)
 	if out, err := runAdl(t, "ca", "status", "--env", "dev"); err != nil || !strings.Contains(out, "configured   true") {
 		t.Fatalf("ca status --env dev: %v\n%s", err, out)
 	}
@@ -231,5 +246,62 @@ func TestConfigurePerStage(t *testing.T) {
 	}
 	if cfg.Partner != "globex" {
 		t.Errorf("default partner %q", cfg.Partner)
+	}
+}
+
+func TestMintAndFlashDevBoard(t *testing.T) {
+	localServer(t)
+	board := espflashtest.NewBoard(t, espflashtest.EncodeTable(espflashtest.ADLTable))
+	t.Setenv("ADL_ESPTOOL", board.Esptool)
+	t.Setenv("ADL_NVS_GEN", strings.Join(espflashtest.Generator(t), " "))
+
+	certs := t.TempDir()
+	out, err := runAdl(t, "mint", "--out", certs, "--port", "/dev/ttyUSB0")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	_, rest, _ := strings.Cut(out, "minted ")
+	id := strings.Fields(rest)[0]
+	if !strings.Contains(out, "board MAC "+strings.ReplaceAll(espflashtest.MAC, ":", "")) {
+		t.Errorf("mint --port did not read the MAC off the board:\n%s", out)
+	}
+	if !strings.Contains(out, "flashed "+id) {
+		t.Errorf("mint --port did not report flashing:\n%s", out)
+	}
+	img, offset := board.Image(t)
+	key, _ := os.ReadFile(filepath.Join(certs, id, "device", "device-"+id+".key"))
+	if offset != "0x120000" || !bytes.Contains(img, bytes.TrimSpace(key)) {
+		t.Fatalf("minted key not written to adl_certs (offset %s)", offset)
+	}
+
+	// Lost the files: adl flash gets them back from the server.
+	if err := os.RemoveAll(certs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(board.Written); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runAdl(t, "flash", id, "--port", "/dev/ttyUSB0", "--dir", certs)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "fetching from the server") {
+		t.Errorf("flash should say it fetched:\n%s", out)
+	}
+	img, _ = board.Image(t)
+	if !bytes.Contains(img, bytes.TrimSpace(key)) {
+		t.Error("re-flash from the server did not write the same key")
+	}
+}
+
+func TestMintDoesNotUseAnIDWhenFlashingCannotWork(t *testing.T) {
+	st := localServer(t)
+	t.Setenv("ADL_ESPTOOL", "/nonexistent/esptool")
+	out, err := runAdl(t, "mint", "--out", t.TempDir(), "--port", "/dev/ttyUSB0")
+	if err == nil || !strings.Contains(err.Error(), "nothing was minted") {
+		t.Fatalf("expected a refusal before minting, got %v\n%s", err, out)
+	}
+	if l, _ := st.Store.ListDevices(context.Background(), ""); len(l) != 0 {
+		t.Errorf("a device was created anyway: %+v", l)
 	}
 }

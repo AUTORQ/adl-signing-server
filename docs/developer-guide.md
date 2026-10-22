@@ -75,6 +75,34 @@ Useful flags:
 | `--no-escrow` | don't back the key up on the server |
 | `--key-type ecdsa-p256` | ECDSA instead of RSA-2048 (only if your firmware doesn't use the DS peripheral) |
 
+## Flashing it onto a board
+
+```sh
+adl mint --port /dev/ttyUSB0        # mint and flash in one go
+adl flash GLXADL017 --port /dev/ttyUSB0
+```
+
+This writes the cert, chain, key and root CA into the board's `adl_certs`
+NVS partition. No eFuses are burned, and it doesn't touch the `nvs`
+partition (your Wi-Fi settings) or cc_comm's `nvs_cc`. The board has to
+run firmware with the `adl_certs` partition; see
+[firmware-nvs.md](firmware-nvs.md). If it doesn't, adl says so and writes
+nothing. The first time, follow "Bringing up the first board" in that page.
+
+`adl flash` uses the files in `certs/GLXADL017/`. If they're gone it pulls
+them from the server first.
+
+You need esptool and Espressif's NVS generator. If you have ESP-IDF
+installed, both are already in its Python environment:
+
+```sh
+export ADL_NVS_GEN="$IDF_PYTHON_ENV_PATH/bin/python -m esp_idf_nvs_partition_gen"
+export ADL_ESPTOOL=esptool.py      # from the IDF environment (. ./export.sh)
+```
+
+Otherwise `pip install esptool esp-idf-nvs-partition-gen` and the defaults
+work.
+
 ## Lost it?
 
 ```sh

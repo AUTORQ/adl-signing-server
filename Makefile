@@ -37,7 +37,7 @@ cli:
 		echo "adl $$os/$$arch"; \
 		GOOS=$$os GOARCH=$$arch $(GOBUILD) -o dist/cli/adl-$$os-$$arch$$ext ./cmd/adl || exit 1; \
 	done
-	cp scripts/eol/*.sh dist/cli/
+	cp scripts/eol/*.sh internal/espflash/adl-nvs.csv dist/cli/
 	cd dist/cli && sha256sum * > SHA256SUMS
 
 dist: lambda ec2 cli

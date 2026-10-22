@@ -426,14 +426,15 @@ func isCode(err error, code string) bool {
 
 const eolLong = `Flash production identities onto ESP32-S3 boards at the end of the line.
 
+Each board gets its certificate, chain, private key and root CA written into
+its adl_certs NVS partition. Nothing burns eFuses. The firmware must have
+the adl_certs partition (see docs/firmware-nvs.md).
+
 ONE-TIME STATION SETUP
-  1. Install esptool and esp-secure-cert-tool at the versions you tested:
-       pip install esptool==<ver> esp-secure-cert-tool==<ver>
-  2. Put adl on PATH, and the flash script where adl looks for it:
+  1. Install the Espressif tools, at the versions you tested:
+       pip install esptool==<ver> esp-idf-nvs-partition-gen==<ver>
+  2. Put adl on PATH:
        adl install
-       mkdir -p ~/.local/share/adl && cp flash-esp32s3.sh ~/.local/share/adl/
-     (machine-wide: sudo adl install system, script in /usr/local/share/adl;
-     or point ADL_FLASH_SCRIPT at the script)
   3. Point adl at the prod signer with the station's AWS profile:
        adl configure --stage prod --url https://signer.example --region us-east-1 \
                      --audience adl-signing-server:123456789012 --profile factory
@@ -448,7 +449,8 @@ EVERY SHIFT
   adl eol provision --port /dev/ttyUSB0 --firmware 1.4.2 --loop
 
   With --loop, plug in a board, wait for PASS or FAIL, press Enter, repeat.
-  Ctrl-C stops between boards.
+  Ctrl-C stops between boards. Boards must already have the app firmware
+  (with its partition table) flashed.
 
 WHAT HAPPENS TO EACH BOARD
   1. esptool reads the chip MAC (the board's permanent ID in the registry)
@@ -456,14 +458,18 @@ WHAT HAPPENS TO EACH BOARD
   3. the CSR and MAC go to the signer, which hands back the device ID
      (prefix + MAC, or the next number) and a certificate signed by the
      prod CA
-  4. key and certs go to a private tmpfs dir, then the flash script runs
-  5. the verify script runs (if set), then the tmpfs dir is wiped
+  4. adl reads the partition table off the board, builds an NVS image for
+     adl_certs and writes it (from a private tmpfs dir)
+  5. the verify script runs (if set), then the tmpfs dir is wiped; the key
+     now exists only on the board
   6. the server marks the board provisioned
   7. a PASS or FAIL banner prints and a line goes to the CSV log
 
 WHEN A BOARD FAILS
   flash or verify failed, cable pulled   fix it and run again on the SAME
                                          board; it keeps its device ID
+  "has no adl_certs partition"           the board's firmware predates the
+                                         partition; flash current firmware
   "already provisioned as <ID>"          stop and set the board aside; it has
                                          been through the line already
   server unreachable / token expired     check network and AWS login, run
@@ -474,20 +480,37 @@ SETTINGS FROM THE ENVIRONMENT
   ADL_STATION            --station
   ADL_PORT               --port
   ADL_FIRMWARE_VERSION   --firmware
-  ADL_FLASH_SCRIPT       --flash-script
-  ADL_VERIFY_SCRIPT      --verify-script
   ADL_ESPTOOL            --esptool
+  ADL_NVS_GEN            --nvs-gen        e.g. "$IDF_PYTHON_ENV_PATH/bin/python
+                                          -m esp_idf_nvs_partition_gen"
+  ADL_NVS_PARTITION      --nvs-partition
+  ADL_NVS_TEMPLATE       --nvs-template
+  ADL_VERIFY_SCRIPT      --verify-script
+  ADL_FLASH_SCRIPT       --flash-script   (replaces the NVS step)
 
-Run "adl eol provision --help" for every flag and the flash script contract.
-The long form is docs/eol-provisioning.md.`
+Run "adl eol provision --help" for every flag. The long form is
+docs/eol-provisioning.md.`
 
-const provisionLong = `Provision the board on --port: read its MAC, issue a prod certificate, flash
-it and confirm it with the server. See "adl eol --help" for the full station
-walkthrough and what to do when a board fails.
+const provisionLong = `Provision the board on --port: read its MAC, issue a prod certificate, write
+it into the adl_certs NVS partition and confirm it with the server. See
+"adl eol --help" for the full station walkthrough and what to do when a
+board fails.
 
-FLASH SCRIPT CONTRACT
-The flash script (and verify script) get these environment variables and
-must exit 0 only if the board is good:
+NVS LAYOUT (namespace "adl", all strings)
+  device_id      GLXADL017
+  device_cert    device certificate (PEM)
+  device_chain   device certificate + intermediate (PEM)
+  device_key     private key (PEM, PKCS#8)
+  ca_root        root CA (PEM)
+
+--nvs-template takes an nvs_partition_gen CSV to change that layout. It can
+use ${ADL_DEVICE_ID}, ${ADL_DEVICE_CERT}, ${ADL_DEVICE_CHAIN},
+${ADL_DEVICE_KEY}, ${ADL_CA_CHAIN} and ${ADL_CA_ROOT}.
+
+CUSTOM FLASH SCRIPT
+--flash-script replaces the NVS step with your own script. It gets these
+environment variables and must exit 0 only if the board is good (the
+verify script gets the same ones):
 
   ADL_PORT, ADL_CHIP, ADL_ESPTOOL   where and how to talk to the board
   ADL_DEVICE_ID, ADL_SERIAL         identity being written
@@ -500,14 +523,16 @@ must exit 0 only if the board is good:
   ADL_CA_ROOT                       path to the root only
   ADL_WORK_DIR                      the tmpfs dir, wiped afterwards
 
-The default flash-esp32s3.sh burns an eFuse HMAC key for the DS peripheral.
-eFuse burns are permanent: try the whole flow on scrap boards first.`
+scripts/eol/flash-esp-secure-cert-ds.sh is one such script, for firmware
+that uses the DS peripheral. It burns an eFuse and refuses to run unless
+ADL_BURN_EFUSE=yes is set.`
 
 // eolOptions are the flags check and provision share.
 type eolOptions struct {
 	stage, partner, station, port, chip, esptool string
 	flashScript, verifyScript                    string
 	firmware, keyType, logPath                   string
+	nvs                                          nvsOptions
 }
 
 func (o *eolOptions) bind(cmd *cobra.Command) {
@@ -518,7 +543,7 @@ func (o *eolOptions) bind(cmd *cobra.Command) {
 	f.StringVar(&o.port, "port", os.Getenv("ADL_PORT"), "serial port of the board, e.g. /dev/ttyUSB0 (env ADL_PORT)")
 	f.StringVar(&o.chip, "chip", "esp32s3", "esptool chip type")
 	f.StringVar(&o.esptool, "esptool", envOr("ADL_ESPTOOL", "esptool.py"), "esptool command (env ADL_ESPTOOL)")
-	f.StringVar(&o.flashScript, "flash-script", envOr("ADL_FLASH_SCRIPT", defaultScript("flash-esp32s3.sh")), "script that writes the credentials to the board (env ADL_FLASH_SCRIPT)")
+	f.StringVar(&o.flashScript, "flash-script", os.Getenv("ADL_FLASH_SCRIPT"), "custom script to write the credentials instead of the built-in NVS step (env ADL_FLASH_SCRIPT)")
 	f.StringVar(&o.verifyScript, "verify-script", os.Getenv("ADL_VERIFY_SCRIPT"), "optional script run after flashing (env ADL_VERIFY_SCRIPT)")
 	f.StringVar(&o.firmware, "firmware", os.Getenv("ADL_FIRMWARE_VERSION"), "firmware version on the line, recorded with the device (env ADL_FIRMWARE_VERSION)")
 	f.StringVar(&o.keyType, "key-type", "rsa2048", "rsa2048 (needed for the ESP32-S3 DS peripheral) or ecdsa-p256")
@@ -534,6 +559,7 @@ func (o *eolOptions) bind(cmd *cobra.Command) {
 		"key-type":      completeKeyType,
 		"log":           completeFiles,
 	})
+	o.nvs.bind(cmd)
 }
 
 func (o *eolOptions) newStation(cmd *cobra.Command) (*eol.Station, error) {
@@ -546,9 +572,13 @@ func (o *eolOptions) newStation(cmd *cobra.Command) (*eol.Station, error) {
 	if err != nil {
 		return nil, err
 	}
+	nvs, err := o.nvs.build(o.esptool, o.chip, o.port, cmd.OutOrStdout())
+	if err != nil {
+		return nil, err
+	}
 	return &eol.Station{
 		Client: c, Env: env, Name: o.station, Port: o.port, Chip: o.chip, Esptool: o.esptool,
-		FlashScript: o.flashScript, VerifyScript: o.verifyScript, Firmware: o.firmware,
+		NVS: nvs, FlashScript: o.flashScript, VerifyScript: o.verifyScript, Firmware: o.firmware,
 		KeyType: o.keyType, LogPath: o.logPath, Out: cmd.OutOrStdout(),
 	}, nil
 }
@@ -569,10 +599,11 @@ func newEOLCheckCommand() *cobra.Command {
 	var o eolOptions
 	cmd := &cobra.Command{
 		Use:   "check",
-		Short: "Check the station is ready: identity, permissions, prod CA, esptool, scripts",
+		Short: "Check the station is ready: identity, permissions, prod CA, flashing tools",
 		Long: `Check the station before a shift: who the server thinks you are, that you
 may issue, provision and read in the prod environment, that the prod CA is
-installed, and that esptool and the flash script are present. Prints
+installed, and that esptool and the NVS generator run (or that the flash
+script is there, with --flash-script). Prints
 "station ready" when everything is in place.`,
 		Example: "  ADL_STATION=line-1 adl eol check",
 		Args:    cobra.NoArgs,
@@ -661,23 +692,6 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
-}
-
-// defaultScript looks for the bundled script next to the binary, then in
-// ../share/adl (where it goes beside an `adl install`ed binary), then in the
-// repo layout.
-func defaultScript(name string) string {
-	if exe, err := os.Executable(); err == nil {
-		for _, p := range []string{
-			filepath.Join(filepath.Dir(exe), name),
-			filepath.Join(filepath.Dir(exe), "..", "share", "adl", name),
-		} {
-			if _, err := os.Stat(p); err == nil {
-				return p
-			}
-		}
-	}
-	return filepath.Join("scripts", "eol", name)
 }
 
 func defaultLogPath() string {
