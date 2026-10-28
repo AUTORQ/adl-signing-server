@@ -5,6 +5,9 @@
 // The device private key only ever exists in station memory and, for the
 // duration of the flash, in a tmpfs directory that is wiped afterwards. It is
 // never sent to the server for prod.
+//
+// By default the identity goes into the board's adl_certs NVS partition
+// (see internal/espflash). A custom flash script can replace that step.
 package eol
 
 import (
@@ -20,11 +23,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/AUTORQ/adl-signing-server/internal/client"
+	"github.com/AUTORQ/adl-signing-server/internal/espflash"
 	"github.com/AUTORQ/adl-signing-server/internal/model"
 	"github.com/AUTORQ/adl-signing-server/internal/pki"
 )
@@ -39,8 +42,11 @@ type Station struct {
 	Chip string
 	// Esptool is the esptool command, e.g. "esptool.py" or "esptool".
 	Esptool string
-	// FlashScript writes the credentials to the device. It gets its inputs
-	// as ADL_* environment variables; see scripts/eol/flash-esp32s3.sh.
+	// NVS writes the credentials into an NVS partition. It is used unless
+	// FlashScript is set.
+	NVS *espflash.NVS
+	// FlashScript, when set, replaces the NVS step. It gets its inputs as
+	// ADL_* environment variables; see docs/eol-provisioning.md.
 	FlashScript string
 	// VerifyScript (optional) runs after flashing, e.g. boots the board and
 	// checks it can reach the cloud with its new identity.
@@ -107,6 +113,13 @@ func (s *Station) chip() string {
 	return s.Chip
 }
 
+// nvs is the station's NVS settings with its board details filled in.
+func (s *Station) nvs() *espflash.NVS {
+	n := *s.NVS
+	n.Port, n.Chip, n.Esptool, n.Out = s.Port, s.chip(), s.Esptool, s.Out
+	return &n
+}
+
 // Preflight checks the station is usable before an operator starts a shift.
 func (s *Station) Preflight(ctx context.Context) error {
 	var problems []string
@@ -115,8 +128,17 @@ func (s *Station) Preflight(ctx context.Context) error {
 			problems = append(problems, fmt.Sprintf("esptool not found (%s): pip install esptool", s.Esptool))
 		}
 	}
-	if st, err := os.Stat(s.FlashScript); err != nil || st.Mode()&0o111 == 0 {
-		problems = append(problems, fmt.Sprintf("flash script %q missing or not executable", s.FlashScript))
+	switch {
+	case s.FlashScript != "":
+		if st, err := os.Stat(s.FlashScript); err != nil || st.Mode()&0o111 == 0 {
+			problems = append(problems, fmt.Sprintf("flash script %q missing or not executable", s.FlashScript))
+		}
+	case s.NVS == nil:
+		problems = append(problems, "no flash method configured")
+	default:
+		if err := s.nvs().Check(ctx); err != nil {
+			problems = append(problems, err.Error())
+		}
 	}
 	if s.VerifyScript != "" {
 		if st, err := os.Stat(s.VerifyScript); err != nil || st.Mode()&0o111 == 0 {
@@ -220,14 +242,15 @@ func (s *Station) Provision(ctx context.Context, o Options) (*Result, error) {
 	return &Result{DeviceID: id, Serial: serial, ChipID: mac, Reissued: reissued}, nil
 }
 
-// flash writes the credentials to a private tmpfs directory, runs the flash
-// (and verify) script, then wipes the directory.
+// flash writes the credentials to a private tmpfs directory, writes them to
+// the board (NVS, or the flash script), runs the verify script, then wipes
+// the directory.
 func (s *Station) flash(ctx context.Context, key crypto.Signer, resp *model.IssueResponse, mac string) error {
-	dir, err := secureTempDir()
+	dir, err := espflash.TempDir()
 	if err != nil {
 		return err
 	}
-	defer wipeDir(dir)
+	defer espflash.Wipe(dir)
 
 	keyPEM, err := pki.EncodePrivateKey(key)
 	if err != nil {
@@ -273,8 +296,21 @@ func (s *Station) flash(ctx context.Context, key crypto.Signer, resp *model.Issu
 	if timeout == 0 {
 		timeout = 5 * time.Minute
 	}
-	if err := s.runScript(ctx, "flash", s.FlashScript, env, timeout); err != nil {
-		return err
+	if s.FlashScript != "" {
+		if err := s.runScript(ctx, "flash", s.FlashScript, env, timeout); err != nil {
+			return err
+		}
+	} else {
+		if err := s.nvs().Flash(ctx, dir, espflash.Files{
+			DeviceID:    resp.Device.ID,
+			DeviceCert:  filepath.Join(dir, "device.crt"),
+			DeviceChain: filepath.Join(dir, "device-chain.pem"),
+			DeviceKey:   filepath.Join(dir, "device.key"),
+			CAChain:     filepath.Join(dir, "ca-chain.pem"),
+			CARoot:      filepath.Join(dir, "ca-root.pem"),
+		}); err != nil {
+			return err
+		}
 	}
 	if s.VerifyScript != "" {
 		if err := s.runScript(ctx, "verify", s.VerifyScript, env, timeout); err != nil {
@@ -307,35 +343,6 @@ func (s *Station) runScript(ctx context.Context, what, path string, env []string
 		return fmt.Errorf("%s script failed: %w", what, err)
 	}
 	return nil
-}
-
-// secureTempDir prefers RAM-backed storage so the key never touches disk.
-func secureTempDir() (string, error) {
-	if runtime.GOOS == "linux" {
-		if st, err := os.Stat("/dev/shm"); err == nil && st.IsDir() {
-			return os.MkdirTemp("/dev/shm", "adl-eol-")
-		}
-	}
-	return os.MkdirTemp("", "adl-eol-")
-}
-
-// wipeDir overwrites then removes every file. On tmpfs the overwrite is
-// mostly ceremony; on a real disk it is best effort.
-func wipeDir(dir string) {
-	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if info, err := d.Info(); err == nil {
-			if f, err := os.OpenFile(p, os.O_WRONLY, 0); err == nil {
-				_, _ = f.Write(make([]byte, info.Size()))
-				_ = f.Sync()
-				_ = f.Close()
-			}
-		}
-		return nil
-	})
-	_ = os.RemoveAll(dir)
 }
 
 // logRun appends one line per board to the station's CSV log, which is

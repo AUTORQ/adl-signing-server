@@ -19,6 +19,7 @@ import (
 
 	"github.com/AUTORQ/adl-signing-server/internal/client"
 	"github.com/AUTORQ/adl-signing-server/internal/eol"
+	"github.com/AUTORQ/adl-signing-server/internal/espflash"
 	"github.com/AUTORQ/adl-signing-server/internal/model"
 	"github.com/AUTORQ/adl-signing-server/internal/pki"
 )
@@ -153,6 +154,7 @@ func newMintCommand() *cobra.Command {
 		stage, partner, id, mac, port, esptool, out, keyType string
 		noEscrow, zipIt, replace                             bool
 		lbl                                                  = labels{}
+		nvs                                                  nvsOptions
 	)
 	cmd := &cobra.Command{
 		Use:   "mint",
@@ -169,8 +171,12 @@ Files written, in the layout flashing scripts expect:
   certs/<ID>/device/device-<ID>-chain.pem   device cert + intermediate
   certs/<ID>/device/ca-chain.pem            intermediate + root
   certs/<ID>/device/ca-root.pem             root CA on its own
-  certs/<ID>/bundle.json                    id / env / serial`,
-		Example: `  adl mint --port /dev/ttyUSB0
+  certs/<ID>/bundle.json                    id / env / serial
+
+With --port, adl reads the MAC off the board and then writes the new identity
+into the board's adl_certs NVS partition (see "adl flash --help"). No eFuses
+are burned.`,
+		Example: `  adl mint --port /dev/ttyUSB0            # mint and flash the board
   adl mint --mac 3c:71:bf:4a:12:e0 --label board=rev-c --label owner=jane
   adl mint --replace --id GLXADL017       # re-key, revokes the old cert
   adl mint --partner acme --stage dev --mac 00:11:22:33:44:55
@@ -178,6 +184,17 @@ Files written, in the layout flashing scripts expect:
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
+			var flasher *espflash.NVS
+			if port != "" {
+				// Set up (and check) the flasher before an ID is used up.
+				var err error
+				if flasher, err = nvs.build(esptool, "esp32s3", port, cmd.OutOrStdout()); err != nil {
+					return err
+				}
+				if err := flasher.Check(ctx); err != nil {
+					return fmt.Errorf("cannot flash, nothing was minted:\n  - %w", err)
+				}
+			}
 			c, err := newClient(ctx, stage)
 			if err != nil {
 				return err
@@ -230,6 +247,12 @@ Files written, in the layout flashing scripts expect:
 			} else {
 				fmt.Fprintf(w, "  backup   key NOT escrowed - if you lose %s it is gone\n", filepath.Join(dir, "device-"+b.DeviceID+".key"))
 			}
+			if flasher == nil {
+				return nil
+			}
+			if err := flashDevice(cmd, flasher, stage, out, b.DeviceID); err != nil {
+				return fmt.Errorf("%s was minted but flashing failed; fix it and run `adl flash %s --port %s`: %w", b.DeviceID, b.DeviceID, port, err)
+			}
 			return nil
 		},
 	}
@@ -238,8 +261,9 @@ Files written, in the layout flashing scripts expect:
 	f := cmd.Flags()
 	f.StringVar(&id, "id", "", "device id (default: made from the MAC, or the next free number)")
 	f.StringVar(&mac, "mac", "", "the board's MAC (e.g. 3c:71:bf:4a:12:e0); device ids are made from it")
-	f.StringVar(&port, "port", "", "read the MAC from the board on this serial port with esptool")
+	f.StringVar(&port, "port", "", "read the MAC from the board on this serial port, then flash the new identity to it")
 	f.StringVar(&esptool, "esptool", envOr("ADL_ESPTOOL", "esptool.py"), "esptool command, with --port (env ADL_ESPTOOL)")
+	nvs.bind(cmd)
 	f.StringVar(&out, "out", "certs", "output directory")
 	f.StringVar(&keyType, "key-type", "rsa2048", "rsa2048 or ecdsa-p256")
 	f.BoolVar(&noEscrow, "no-escrow", false, "do not back up the private key on the server")

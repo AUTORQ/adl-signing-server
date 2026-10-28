@@ -3,8 +3,12 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
+	"crypto"
+	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -17,6 +21,8 @@ import (
 	"github.com/AUTORQ/adl-signing-server/internal/auth/authtest"
 	"github.com/AUTORQ/adl-signing-server/internal/client"
 	"github.com/AUTORQ/adl-signing-server/internal/eol"
+	"github.com/AUTORQ/adl-signing-server/internal/espflash"
+	"github.com/AUTORQ/adl-signing-server/internal/espflash/espflashtest"
 	"github.com/AUTORQ/adl-signing-server/internal/localstack"
 	"github.com/AUTORQ/adl-signing-server/internal/model"
 	"github.com/AUTORQ/adl-signing-server/internal/pki"
@@ -240,5 +246,84 @@ func TestEndOfLine(t *testing.T) {
 	crl, err := e.client.CRL(ctx, "prod")
 	if err != nil || len(crl) == 0 {
 		t.Errorf("crl: %v", err)
+	}
+}
+
+// The default station path: identity written into the adl_certs NVS
+// partition, no flash script.
+func TestEndOfLineNVS(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.sts.SetARN(stationARN)
+	board := espflashtest.NewBoard(t, espflashtest.EncodeTable(espflashtest.ADLTable))
+
+	mac := "f412fa0a0c01"
+	st := &eol.Station{
+		Client: e.client, Env: "prod", Name: "line-1", Port: "/dev/null", Esptool: board.Esptool,
+		NVS:      &espflash.NVS{Generator: espflashtest.Generator(t)},
+		Firmware: "1.0.0", KeyType: "rsa2048",
+		ReadMAC: func(context.Context) (string, error) { return mac, nil },
+	}
+	if err := st.Preflight(ctx); err != nil {
+		t.Fatal(err)
+	}
+	res, err := st.Provision(ctx, eol.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	img, offset := board.Image(t)
+	if offset != "0x120000" {
+		t.Errorf("identity written at %s, want adl_certs at 0x120000", offset)
+	}
+	// In a real NVS image each value sits after a binary entry header, not
+	// a newline, so decode from every BEGIN marker rather than chaining
+	// pem.Decode.
+	var certs []*x509.Certificate
+	var key crypto.Signer
+	for _, part := range bytes.Split(img, []byte("-----BEGIN "))[1:] {
+		block, _ := pem.Decode(append([]byte("-----BEGIN "), part...))
+		if block == nil {
+			t.Fatal("unparseable PEM in the NVS image")
+		}
+		switch block.Type {
+		case "CERTIFICATE":
+			c, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			certs = append(certs, c)
+		case "PRIVATE KEY":
+			k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key = k.(crypto.Signer)
+		}
+	}
+	if key == nil || len(certs) == 0 {
+		t.Fatalf("image holds %d certs and key=%v", len(certs), key != nil)
+	}
+	leaf := certs[0]
+	if leaf.Subject.CommonName != res.DeviceID {
+		t.Errorf("first cert in NVS is %s, want %s", leaf.Subject.CommonName, res.DeviceID)
+	}
+	if !leaf.PublicKey.(interface{ Equal(crypto.PublicKey) bool }).Equal(key.Public()) {
+		t.Error("key in NVS does not match the certificate")
+	}
+	if !certs[len(certs)-1].Equal(e.stack.Roots["prod"]) {
+		t.Error("ca_root in NVS is not the prod root")
+	}
+
+	// A board with today's firmware (no adl_certs partition) is refused before
+	// anything is written, and stays unconfirmed for a re-run.
+	mac = "f412fa0a0c02"
+	old := espflashtest.NewBoard(t, espflashtest.EncodeTable(espflashtest.ADLTable[:4]))
+	st.Esptool = old.Esptool
+	if _, err := st.Provision(ctx, eol.Options{}); err == nil || !strings.Contains(err.Error(), "adl_certs, data, nvs") {
+		t.Fatalf("board without adl_certs: %v", err)
+	}
+	if _, err := os.Stat(old.Written); err == nil {
+		t.Error("something was written to a board without adl_certs")
 	}
 }

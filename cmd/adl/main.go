@@ -61,7 +61,7 @@ First time on a machine:
   adl configure --url ...     point it at the signing server
   adl whoami                  check who the server thinks you are
 
-Dev board:     adl mint, then flash the files it writes
+Dev board:     adl mint --port /dev/ttyUSB0 (mint and flash), see adl flash --help
 Factory line:  adl eol --help walks through the flashing station step by step
 
 Words used here:
@@ -97,7 +97,7 @@ With a signer per stage, configure each with "adl configure --stage dev|prod";
 		}
 	}
 	add(groupSetup, newConfigureCommand(), newWhoamiCommand(), newVersionCommand())
-	add(groupDev, newMintCommand(), newFetchCommand(), newListCommand(), newShowCommand())
+	add(groupDev, newMintCommand(), newFlashCommand(), newFetchCommand(), newListCommand(), newShowCommand())
 	add(groupFactory, newEOLCommand())
 	add(groupAdmin, newRevokeCommand(), newCACommand(), newImportCommand(), newAuditCommand())
 
